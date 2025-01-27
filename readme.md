@@ -21,9 +21,13 @@ So, bits from the emulator that I want to keep:
    native file support. So, that also means BDOS level compatability with
    CP/M, not BIOS - so anything that expected to do direct sector or low
    level hardware access is out of scope. CPemu did this with some complex
-   bank switching, and hoop jumping. This time I want to do the entire
-   operation as a continiously running dot command. So that we can
-   cleanly exit back to NextZXOS and have 100% state preservation.
+   bank switching, and hoop jumping.
+
+ * The technology - CPemu was a dot command - and the whole of the CP/M
+   environment ran within that dot command. I still want to do the entire
+   operation as a continiously running dot command, this means that we can
+   cleanly exit back to NextZXOS and have 100% state preservation, as is
+   the "user expectation" with a dot command.
 
  * The memory management - CPemu did this with the Next's MMU to keep
    most code out of the linear memory space, and I plan to keep that idea
@@ -45,4 +49,5 @@ Bits I want to change:
    will change a LOT before you can use this project for anything useful.
  * CPemu was very much designed to be a single purpose hack, I am hoping
    this can be a little bit more versatile, useful, and be code one can use
-   for other productivity software for the Next in the future.
+   for other system utility and development or productivity software for
+   running on the Next in the future.
