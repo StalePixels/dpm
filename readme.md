@@ -38,16 +38,3 @@ So, bits from the emulator that I want to keep:
    using extra memory from NextZXOS, returned when done, we'll be banking
    up both ULA areas (one for display, one for tiles) so we can even
    restore the display once finished.
-
-Bits I want to change:
-
- * I am determined to release more stuff in 2025 than I did in 2024, so
-   I'm developing this entirely in the open. That means expect irregular
-   progress, if and when I get time.
- * "Release early. Release often." Basically same as the first point but
-   in this case it means you'll get lots of broken code - this readme
-   will change a LOT before you can use this project for anything useful.
- * CPemu was very much designed to be a single purpose hack, I am hoping
-   this can be a little bit more versatile, useful, and be code one can use
-   for other system utility and development or productivity software for
-   running on the Next in the future.
