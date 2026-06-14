@@ -1,0 +1,3 @@
+#autostart 10
+10 OUT 12091,0: REM nextfaststart: revert to normal speed before DPM
+20 .dpm
