@@ -25,7 +25,8 @@ entry:
         jr      c, .exec_func
 
         ; db 'BAD BDOS CALL: ',0
-        jr $
+        
+        m_CSpect_BREAK;jr $
         jp      $0000                    ; Totally abandon anything after a bad BDOS call!
 
 .exec_func:
@@ -286,7 +287,7 @@ bdosBinPcHi     EQU     (100*bdosBinSz)/(256*14)
 bdosBinSz       EQU     bdos_end-bdos_start
 
 bdosBinPcLo     EQU     ((100*bdosBinSz)%(256*14))*10/(256*14)
-    DISPLAY "BDOS LEN\t:\t",/D,bdosBinSz,"B\t(",/D,bdosBinPcHi,".",/D,bdosBinPcLo,"% of 6.5kiB)"
+    DISPLAY "BDOS LEN\t:\t",/D,bdosBinSz,"B\t(",/D,bdosBinPcHi,".",/D,bdosBinPcLo,"% of 3.5kiB)"
     
     SAVEBIN "../build/BDOS",bdos_start,bdosBinSz
     DISPLAY "======================================================= <"

@@ -10,3 +10,4 @@
 
     DEFINE DPMversion "0.0.1"
     DEFINE DPMname "DPM"
+    DEFINE DPMyear "2024"

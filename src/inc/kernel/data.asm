@@ -19,7 +19,7 @@ strings:
         
 .greeting:
         DB DPMname, " v", DPMversion, " ZXNext CPM Emulator", 10, 13
-        DB COPYRIGHT, "lGPLv3 2022 D. 'Xalior' Rimron-Soutter", 10, 13, 10, 13
+        DB COPYRIGHT, "lGPLv3 ",DPMyear," D. 'Xalior' Rimron-Soutter", 10, 13, 10, 13
         DB "ESXDOS Bootstrapping...", 10, 13, 0
 
 .unimplimented:
@@ -30,11 +30,11 @@ strings:
 .restarting:
         DB      "Restarting...", 10, 13, 0
 
-; ccp_image:
-;         DISPLAY "kernel CCPimg\t:\t",/H,$
-;         INCBIN "../build/CCP"
+ccp_image:
+        DISPLAY "kernel CCPimg\t:\t",/H,$
+        INCBIN "../build/CCP"
 
-;         DISPLAY "kernel CCPend\t:\t",/H,$
+        DISPLAY "kernel CCPend\t:\t",/H,$
 cp437_font:
         DISPLAY "kernel glyphs\t:\t",/H,$
         INCBIN "../assets/CP437-256.UDG"

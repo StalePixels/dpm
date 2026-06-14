@@ -8,18 +8,18 @@
 ;
 ;-----------------------------------------------------------------------------
 
-    MODULE KERNEL
-    
 m_kr_unimplimented MACRO func_name
         call    kr_print_unimplimented
         ld      hl, func_name
         call    kr_print_string_hl
+        m_CSpect_BREAK
         jr $
     ENDM
 m_kr_fatal MACRO func_name
         call    kr_print_error
         ld      hl, func_name
         call    kr_print_string_hl
+        m_CSpect_BREAK
         jr      $
     ENDM
 ;
@@ -42,10 +42,14 @@ m_kr_esxdos    MACRO   func
         ld      sp, $AAAA
         call    KERNEL.disable_esxdos_rom
     ENDM
+
+    MODULE KERNEL
+    
 ;
 
 ;; Setup VM environment, colours, etc. - take over from NextZXOS
 setup:                                   ; DPM starting up - initialise hardware & drives for the VM
+
 .load_config:
         /* 
         ;; remember to check path ends with '/'
@@ -60,7 +64,6 @@ setup:                                   ; DPM starting up - initialise hardware
         inc     hl
  ;         */
         m_PrintMsg KERNEL.strings.path  ; Display our own startup message
-        
         ld      de, config.install_path
         ld      hl, dynamic_data.working_path
         call    KERNEL.strcpy
@@ -203,7 +206,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ; pop     af : pop hl : pop hl
         ld a, 0x0D : m_PrintCharInA
         m_PrintMsg KERNEL.strings.error            ; Display "ERROR"
-        jr $
+        m_CSpect_BREAK;jr $
         
 .setup_hardware:
         ld      (KERNEL.dynamic_data.dot_stack), sp ;Preserve dotcommand stack pointer for exit of kernel
@@ -358,7 +361,6 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      a, $00                  ; $00
         ld      ($0003), a              ; 
         ld      ($0004), a              ; User Number in Top Nybble, Disk in Low Nybble
-        m_CSpect_BREAK
         ld      hl, BDOS.entry          ; BDOS entry point
         ld      (BDOSPTR_A), hl         ; Undocumented instruction! Copy HL to addr.
         
@@ -582,11 +584,11 @@ BOOTROM:
         nextreg	MMU3_6000_NR_53, a
         ;; 4 and 5 are the kernel, we do them from the BIOS
         
-        ; ;; Copy the CCP into upper memory
-        ; ld      hl, ccp_image;              ; Copy From
-        ; ld      de, CCP_A;                  ; Copy To
-        ; ld      bc, ccpBinSz;               ; Length of Copy
-        ; ldir                                ; ldi repeat. Go. 
+        ;; Copy the CCP into upper memory
+        ld      hl, ccp_image;              ; Copy From
+        ld      de, CCP_A;                  ; Copy To
+        ld      bc, ccpBinSz;               ; Length of Copy
+        ldir                                ; ldi repeat. Go. 
         
         call    KERNEL_TERM.init
         ld      a, $ff                      ; To make sure there's no pending keys

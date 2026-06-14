@@ -97,8 +97,7 @@ entry_BOOTROM:
         ld      (USERDRIVE_A), a        ; Store them in base memory
         ld      c, a
         ld      hl, CCP_A+3             ;CCP_A+3 moves us past the first jump instruction
-                
-        jp      hl;
+        jp      hl
         
 entry_BOOT:                         ;-3: Cold start routine
 entry_WBOOT:                        ; 0: Warm boot - reload command processor
@@ -168,11 +167,11 @@ bios_end:
 ;-----------------------------------------------------------------------------
 ; -- Report size, export memory as binary
 ;-----------------------------------------------------------------------------
-biosBinPcHi  EQU     (100*biosBinSz)/(256*6)
+biosBinPcHi  EQU     (100*biosBinSz)/(256*2)
 biosBinSz   EQU     bios_end-bios_start      ; Shamelessly stolen clever reporting code from .DISPLAYEDGE by Ped7g
 
-biosBinPcLo  EQU     ((100*biosBinSz)%(256*6))*10/(256*6)
-    DISPLAY "BIOS LEN\t:\t",/D,biosBinSz,"B\t(",/D,biosBinPcHi,".",/D,biosBinPcLo,"% of 1.5kiB)"
+biosBinPcLo  EQU     ((100*biosBinSz)%(256*2))*10/(256*2)
+    DISPLAY "BIOS LEN\t:\t",/D,biosBinSz,"B\t(",/D,biosBinPcHi,".",/D,biosBinPcLo,"% of 0.5kiB)"
     
     SAVEBIN "../build/BIOS",bios_start,biosBinSz
     DISPLAY "======================================================= <"

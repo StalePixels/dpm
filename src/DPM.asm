@@ -27,7 +27,9 @@
                                         ; Generate our dependencies, which are appended to the dot
     INCLUDE "BIOS.asm"                          ; BIOS main mem
     INCLUDE "BDOS.asm"                          ; BDOS main mem
-    INCLUDE "kernel.asm"                        ; Main kernel @ 0x8000
+    INCLUDE "CCP.asm"                           ; CP/M 2.2 main shell, modified for DPM
+                                        ; Generate our kernel last, as it includes artifacts of above
+    INCLUDE "kernel.asm"                        ; Main kernel @ 0x8000 
 
 
     ORG     ESX_A
@@ -64,6 +66,7 @@ backup_state:
                                             ; this later, without the flags, so we'll use C instead.
         push    bc                          ; Store C, which contains I - we don't care about B
         ld      (state_exit.SMC_stack), sp  ; Stash the stack pointer into the SMC exit routine.
+        
         
         m_NextRegRead_c CPU_SPEED_NR_07     ; Read CPU speed
         ld      (state_exit.SMC_cpu), a     ; Save current speed so it can be restored on exit
@@ -169,8 +172,9 @@ allocate_memory:                        ; Last 16k, 96k total - save the bank nu
         ;; We've finished using NextZXOS, move stack 
         ld      (exit_kernel.SMC_dotstack), sp  ; Stash the stack pointer for return from kernel.
         
-        ;; Currently we're not using stack in DivMMC RAM - so skip this
-        ; ld      sp, dot_stack             
+        ;; Move the stack pointer into DivMMC RAM, so we can load stuff up high for the OS...
+        ; ld      sp, dot_stack
+        ld      sp, CCP_A-1
                 
         ;; Load our kernel, which is out main memory space, made of "bootROM", stored at end of dotcommand
         m_esxdos M_GETHANDLE                    ; Get handle of current dot in A
@@ -224,6 +228,7 @@ pause:
         pop     af
         dec     a
         jp      nz, pause
+        m_CSpect_BREAK
 
 
 exit_kernel:

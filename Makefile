@@ -1,6 +1,7 @@
 # External commands we use, override with Env Vars
 MONO:=mono
 CAT:=cat
+CP:=cp
 TOUCH:=touch
 MKDIR:=mkdir -pv
 ECHO:=echo
@@ -8,11 +9,13 @@ SJASMPLUS:=sjasmplus
 
 EMU_PATH=/Volumes/DPM/DPM
 
+PHONY: dev
+
 emulate:
-	$(MONO) CSpect/CSpect.exe -sound -mouse -w8 -zxnext -r -joy -esc -basickeys -brk -fps -mmc=2gb/cspect-next-2gb.img -map=src/DPM.map
+	$(MONO) CSpect/CSpect.exe -sound -mouse -w8 -zxnext -r -joy -esc -basickeys -brk -16bit -fps -mmc=2gb/cspect-next-2gb.img -map=src/DPM.map
 
 turbo:
-	$(MONO) CSpect/CSpect.exe -sound -mouse -w8 -zxnext -r -joy -esc -basickeys -brk -freerun -fps -mmc=2gb/cspect-next-2gb.img -map=src/DPM.map
+	$(MONO) CSpect/CSpect.exe -sound -mouse -w8 -zxnext -r -joy -esc -basickeys -brk -16bit -freerun -fps -mmc=2gb/cspect-next-2gb.img -map=src/DPM.map
 
 dot:
 	cd src && $(SJASMPLUS) DPM.asm
@@ -20,6 +23,12 @@ dot:
 	$(CAT) build/kernel >> build/DPM		#   & Append kernel to dot command
 	$(CAT) build/BIOS >> build/DPM			#    & Append BIOS to dot command
 	$(CAT) build/BDOS >> build/DPM			#    & Append BDOS to dot command
+	$(CAT) build/CCP >> build/DPM			#    & Append CCP to dot command
+
+install_emu:
+	$(CP) build/DPM /Volumes/DPM/dot
+
+dev: dot install_emu turbo
 
 setup_emulator:
 	@$(MKDIR) $(EMU_PATH)/A/0
