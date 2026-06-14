@@ -87,6 +87,32 @@ cache_current_fcb_for_kernel:
         pop     bc
         pop     de
         ret
+
+
+; Copy FCB (destination pointed to by HL) from cache in BDOS
+;   Source FCB can be anywhere in RAM. Should only be called while kernel is paged in.
+restore_current_fcb_for_kernel:
+        push    de
+        push    bc
+        ;; Ensure that all the userland memory is available, incase HL resides behind kernel
+.SMC_MMU4_userland EQU $+3:
+        nextreg	MMU4_8000_NR_54, 0xAA
+.SMC_MMU5_userland EQU $+3:
+        nextreg	MMU5_A000_NR_55, 0xAA
+        push    hl
+        pop     de                          ; Copy to DE, as HL is the destination for the FCB copy    
+        ld      hl, fcb_cache               ; Copy from
+        ld      bc, 36                      ; Length of Copy
+        ldir                                ; ldi repeat. Go.
+        ;; Restore kernel
+.SMC_MMU4_kernel EQU $+3:
+        nextreg	MMU4_8000_NR_54, 0xAA
+.SMC_MMU5_kernel EQU $+3:
+        nextreg	MMU5_A000_NR_55, 0xAA
+        pop     bc
+        pop     de
+        ret
+
 ;
 ; Copy DMA cache to DMA address
 copy_dma_out_kernel:
@@ -221,7 +247,7 @@ temp_fcb:
 
 
 store_target:
-        dw 0
+        dw 0                            ; rename target FCB ptr — BDOS (always mapped) not kernel
     
 greeting:
         DB "Fake BDOS Banner", 0

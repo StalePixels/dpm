@@ -230,12 +230,14 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (BIOS.entry_BOOTROM.SMC_MMU4_userland), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_userland), a
         ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU4_userland), a
+        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU4_userland), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_userland), a
         
         ld      a, (KERNEL.dynamic_data.state.mmu5)         ; Get MMU4(userland5) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU5_userland), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU5_userland), a
         ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU5_userland), a
+        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU5_userland), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_userland), a
         
         ;ld      a, (KERNEL.dynamic_data.state.mmu6)         ; Get MMU6(userland6) and patch the following
@@ -246,6 +248,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU4_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_kernel), a
         ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU4_kernel), a
+        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU5_kernel), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_kernel), a
         
@@ -253,6 +256,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU5_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU5_kernel), a
         ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU5_kernel), a
+        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU5_kernel), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU5_kernel), a
         
@@ -1307,9 +1311,6 @@ make_file_success:
         jp ret0_in_a
 
 BDOS_F_RENAME:
-            m_kr_unimplimented BDOS_F_RENAME_string
-BDOS_F_RENAME_string:
-        DB "BDOS_F_RENAME", 0
     ; DE points to a FCB with the
     ; SOURCE filename at FCB+0 and
     ; TARGET filename at FCB+16.
@@ -1318,15 +1319,19 @@ BDOS_F_RENAME_string:
     ; Success a = 0
     ; Error a = 255
 
-;    ld (store_source), de                               ; Store source FCB pointer for now
-;    push de
-;    call KERNEL_BDOS.close_file                                ; just in case there is an open one.
-;    pop de
+   ld (dynamic_data.store_source), de                  ; Store source FCB pointer for now
+   push de
+   call KERNEL_BDOS.close_file                         ; just in case there is an open one.
+   pop de
 
-;    ld hl, 16
-;    add hl, de
-;    ld (store_target), hl                               ; And store the target FCB for now
-;    ex de, hl                                           ; target is now in de
+   ld hl, 16
+   add hl, de
+   ld (BDOS.store_target), hl                               ; And store the target FCB for now
+   ex de, hl                                           ; target is now in de
+
+            m_kr_unimplimented BDOS_F_RENAME_string
+BDOS_F_RENAME_string:
+        DB "BDOS_F_RENAME", 0
 
     ; Check if target drive is "default", if so, copy from source.
 ;    ld hl, (store_target)                           ; retrieve pointer to target file
