@@ -1039,7 +1039,8 @@ BDOS_F_CLOSE:
 ; so that "search_for_next" get the next entry.
 BDOS_F_SFIRST:
         ld      a, 0
-        ld      (file_counter), a 
+        ld      (file_counter), a
+        ld      a, (KERNEL_BDOS.current_esxdos.dir_handle)
         push    de
         m_kr_esxdos F_CLOSE
         pop     de
