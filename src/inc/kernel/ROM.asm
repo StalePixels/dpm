@@ -763,7 +763,7 @@ BDOS_C_RAWIO:
         jr      nz, .write_console
         call    KERNEL_KEYBOARD.read_char_a
         ; ld      b, 1
-        call    KERNEL_DEBUG.tm_a_loc78
+        call    KERNEL_DEBUG.tm_a_loc74
         cp      $FF
         jr      z, .set_zero
         or      a
