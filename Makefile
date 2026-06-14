@@ -8,6 +8,7 @@ ECHO:=echo
 SJASMPLUS:=sjasmplus
 HDIUTIL:=hdiutil
 MAME:=mame
+SEQ:=seq
 TXT2BAS:=txt2bas
 
 # --- Emulator image: NextZXOS SD card. Its FAT volume is labelled "DPM",
@@ -187,3 +188,9 @@ _setup_files:
 	@$(TOUCH) "$(EMU_PATH)/A/0/bulk.01C"
 	@$(TOUCH) "$(EMU_PATH)/A/0/bulk.01D"
 	@$(TOUCH) "$(EMU_PATH)/A/0/bulk.01E"
+	@$(SEQ) -w 1 16 | while read n; do printf 'Line %s of 16: DPM multi-block TYPE test, wide line to limit scrolling. .END\r\n' "$$n"; done > "$(EMU_PATH)/A/0/big.txt"
+	@printf '%0128d' 0 | tr '0' '.' > "$(EMU_PATH)/A/0/rec128.txt"
+	@printf '%0256d' 0 | tr '0' '.' > "$(EMU_PATH)/A/0/rec256.txt"
+	@$(ECHO) "rename me" > "$(EMU_PATH)/A/0/rename.me"
+	@$(ECHO) "this file lives in user area 1" > "$(EMU_PATH)/A/1/user1.txt"
+	@$(ECHO) "this file lives on drive B" > "$(EMU_PATH)/B/0/bdrive.txt"
