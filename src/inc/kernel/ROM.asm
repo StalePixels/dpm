@@ -1309,7 +1309,7 @@ make_file_success:
 BDOS_F_RENAME:
             m_kr_unimplimented BDOS_F_RENAME_string
 BDOS_F_RENAME_string:
-        DB "BDOS_F_READ", 0
+        DB "BDOS_F_RENAME", 0
     ; DE points to a FCB with the
     ; SOURCE filename at FCB+0 and
     ; TARGET filename at FCB+16.
