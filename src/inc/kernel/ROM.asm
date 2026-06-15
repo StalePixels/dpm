@@ -1029,6 +1029,11 @@ BDOS_F_OPEN:
 ;
 ; Pass in de -> FCB - return 0 for success, 255 for fail
 BDOS_F_CLOSE:
+        ;; Since we backend this to a pure ESXDOS close, and then just wipe the current FCB, 
+        ;; we don't need to do anything with the FCB passed in.... this is here as a reminder
+        ;; if and when we start to support multiple open files, then we will need to use the 
+        ;; FCB passed in to find the right file to close.
+        ; call BDOS.cache_current_fcb_for_kernel      ; cache FCB for use in kernel (mutate DE)
         call KERNEL_BDOS.close_file
         call KERNEL_BDOS.clear_current_fcb          ; Clear out current FCB
         jp ret0_in_a
