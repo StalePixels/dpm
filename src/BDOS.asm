@@ -26,14 +26,14 @@ entry:
 
         ; db 'BAD BDOS CALL: ',0
         
-        m_CSpect_BREAK;jr $
+        m_CSpect_BREAK
         jp      $0000                    ; Totally abandon anything after a bad BDOS call!
 
 .exec_func:
         ld      (BIOS.internal_TEARDOWN.SMC_exitstack), sp
         ld      sp, BIOS.stack
 
-        push    hl
+        push    hl              ; WARNING: intentionally inbalanced...
         push    de
         
         ld      hl, kernel_jump_table        ; Base entry in jump table
@@ -42,19 +42,17 @@ entry:
         add     hl, de                       ; Add it to HL...
         add     hl, de                       ; ...twice - to get right (16bit) address
 
-        ld      e, (hl)
-        inc     hl
-        ld      d, (hl)                      ; ld de, (hl)
-        ex      de, hl                       ; hl now holds address of the BDOS call
+        ld      e, (hl): inc hl: ld d, (hl)  ; ld de, (hl)
+        ex      de, hl          ; HL now holds address of the BDOS call
         
-        pop     de
-        ; pop hl occours in the BIOS.internal_KERNEL_call
+        pop     de              ; & DE the parameters for the call
+                                ; WARNING: pop hl occours in the BIOS.internal_KERNEL_call
         call    BIOS.internal_KERNEL_call
        
         ; Now return. So anything that wants to return a value in HL should do ld a,l ld b,h first
         ld      l, a                         ; This is how the BDOS returns values.
         ld      h, b                         ; Note: that it is important to some 
-        ret                             ; programs that both A and B are set.
+        ret                                  ; programs that both A and B are set.
 
 ; internal_TEARDOWN:
 internal_TEARDOWN.SMC_MMU4 EQU $+3
@@ -66,16 +64,22 @@ internal_TEARDOWN.SMC_exitstack EQU $+1
         ld      sp, 0xAAAA                  ; restore original stack pointer, as above 0xAAAA is SMC.
 
 
-; Copy FCB (pointed to by HL) to cache in BDOS
-;   Source FCB can be anywhere in RAM. Should only be called while kernel is paged in.
+; Copy FCB (pointed to by DE) to cache in BDOS
+;   Source FCB can be anywhere in RAM. Should only be called by kernel operations.
+;   Returns new FCB in DE, all other registers unchanged
 cache_current_fcb_for_kernel:
-        push    de
-        push    bc
+        ; ld      (.SMC_SOURCE_FCB_COPY), de
+        ld      (restore_current_fcb_for_kernel.SMC_ORIGINAL_FCB_COPY), de
+        push    bc      ; Save these ...
+        push    hl      ; ... and restore later
+        ex      de, hl
         ;; Ensure that all the userland memory is available, incase HL resides behind kernel
 .SMC_MMU4_userland EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_userland EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
+; .SMC_SOURCE_FCB_COPY EQU $+1
+;         ld      hl, (0xAAAA)                ; SMC copy from    
         ld      de, fcb_cache               ; Copy To
         ld      bc, 36                      ; Length of Copy
         ldir                                ; ldi repeat. Go.
@@ -84,12 +88,13 @@ cache_current_fcb_for_kernel:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_kernel EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
+        ;; And the saved registers
+        pop     hl
         pop     bc
-        pop     de
+        ld      de, fcb_cache               ; Leave DE pointing at new FCB in BDOS
         ret
 
-
-; Copy FCB (destination pointed to by HL) from cache in BDOS
+; Copy FCB from cache in BDOS to address on stack
 ;   Source FCB can be anywhere in RAM. Should only be called while kernel is paged in.
 restore_current_fcb_for_kernel:
         push    de
@@ -99,9 +104,9 @@ restore_current_fcb_for_kernel:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_userland EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
-        push    hl
-        pop     de                          ; Copy to DE, as HL is the destination for the FCB copy    
         ld      hl, fcb_cache               ; Copy from
+.SMC_ORIGINAL_FCB_COPY EQU $+1
+        ld      de, 0xAAAA                ; SMC copy from    
         ld      bc, 36                      ; Length of Copy
         ldir                                ; ldi repeat. Go.
         ;; Restore kernel

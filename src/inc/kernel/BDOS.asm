@@ -28,7 +28,8 @@ clear_current_fcb:
         ldir
         ret
 ;
-; Copies the current FCB, pointed to by DE, into the "Current FCB" cache 
+; Copies the current FCB, pointed to by DE, into the "Current Open FCB"
+;     referenced by BDOS functions for future file operations on open file 
 ;     Dirties HL, AF, BC. Preserves DE
 copy_fcb_to_current_fcb:
         push    de                          ; Keep original FCB safe

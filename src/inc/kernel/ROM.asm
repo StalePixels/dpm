@@ -248,7 +248,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU4_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_kernel), a
         ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU4_kernel), a
-        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU5_kernel), a
+        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU4_kernel), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_kernel), a
         
@@ -985,11 +985,8 @@ BDOS_DRV_SET:
 ; The FCB that was passed in gets copied into the Current_FCB so we know which file is open.
 ;  Return a = 0 for success, a = 255 for error.
 BDOS_F_OPEN:
-                        ; call    KERNEL_DEBUG.print_crlf
-                        ; ld hl, KERNEL_DEBUG.open__string : call KERNEL.kr_print_string_hl
-                        ; ld a, "<" : call KERNEL_TERM.process
-                        ; push    de : inc de : push de : pop hl : call KERNEL.kr_print_string_hl : pop de
-                        ; ld a, ">" : call KERNEL_TERM.process
+        call    BDOS.cache_current_fcb_for_kernel ; Userland call, cache FCB for use in kernel
+.kernel_entry:
         xor     a                                   ; Wipe A
 .resume:
         push    de                                  ; Preserve the incoming settings
@@ -1026,8 +1023,8 @@ BDOS_F_OPEN:
         ld      (KERNEL_BDOS.current_esxdos.file_handle), a
         pop     de
         call    KERNEL_BDOS.copy_fcb_to_current_fcb ; File is now open, so copy FCB to Current FCB
-                        ; ld      a, 'v' : call KERNEL_TERM.process
-        jp      ret0_in_a
+
+        jp      restore_fcp_ret0_in_a
         
 ;
 ; Pass in de -> FCB - return 0 for success, 255 for fail
@@ -1157,6 +1154,7 @@ BDOS_F_DELETE:
 ;     When <128 bytes, remainder is padded with NULLs, updates Current_FCB
 ;     pointer values with every read.
 BDOS_F_READ:
+        call    BDOS.cache_current_fcb_for_kernel ; Userland call, cache FCB for use in kernel (mutate DE)
         push    de                                  ; Keep the DE
                         ; call KERNEL_DEBUG.print_crlf
                         ; ld hl, KERNEL_DEBUG.read__string : call KERNEL.kr_print_string_hl
@@ -1222,7 +1220,7 @@ BDOS_F_READ:
         ex      de, hl                              ; FCB back in DE now
         call    KERNEL_BDOS.copy_fcb_to_current_fcb ; Make a note of the state of the currently open file
         
-        jp ret0_in_a                                ; Success
+        jp restore_fcp_ret0_in_a                      ; Success
 .seek_fail:
         pop     de                                  ; Balance remainder of pushed BC/DE
 .read_fail:
@@ -1661,6 +1659,9 @@ BDOS_48:
 ;-----------------------------------------------------------------------------
 ;-- Size reducing utility methods - for common >3byte things we do
 ;-----------------------------------------------------------------------------
+
+restore_fcp_ret0_in_a:
+        call BDOS.restore_current_fcb_for_kernel
 ret0_in_a:
         xor a                                           ; a = 0
         ld b, a

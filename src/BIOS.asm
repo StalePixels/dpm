@@ -53,6 +53,8 @@ WBOOTE
         ; ret : nop : nop             ;28:81: NOP
         ; jp      entry_USERF         ;29:84: User Function
         
+// Private BIOS routine to call internal Kernel BDOS function
+//  function address passed in hl, params in DE
 internal_KERNEL_call:
 .SMC_MMU4_kernel EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
@@ -64,7 +66,7 @@ internal_KERNEL_call:
         
         ; Set our destination jump into kernel
         ld      (.internal_KERNEL_func), hl
-        pop     hl              ; Stack is now empty
+        pop     hl              ; (WARNING: intentionall unbalanced) stack is now empty
 .internal_KERNEL_func EQU $+1
         call    0xAAAA                      ; Kernel routine to call, was in HL, 0xAAAA is SMC.
 
