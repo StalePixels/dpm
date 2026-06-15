@@ -35,7 +35,9 @@ AUTOEXEC_DST:=$(MOUNT)/nextzxos/autoexec.bas
 #     (https://github.com/mamedev/mame/blob/master/plugins/boot.lua) and are
 #     enabled in plugin.ini -- see ../../docs/emulator.md for the full setup.
 MAME_SYS:=tbblue
-MAME_RUN:=$(MAME) $(MAME_SYS) -hard1 $(IMAGE) -debug -plugin nextbreak,debugstart,nextfaststart
+MAME_RUN:=$(MAME) $(MAME_SYS) -hard1 $(IMAGE) \
+		-window -nomaximize -resolution 1024x768 -nothrottle \
+		-debug -plugin nextbreak,debugstart,nextfaststart
 
 .PHONY: dev emulate turbo dot install_emu autoexec mount_image unmount_image \
         cspect cspect_turbo setup_emulator setup_emulator_testfiles \
