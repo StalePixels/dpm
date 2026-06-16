@@ -986,7 +986,7 @@ BDOS_DRV_SET:
 ;  Return a = 0 for success, a = 255 for error.
 BDOS_F_OPEN:
         call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
-.kernel_entry:
+.actual:
         xor     a                                   ; Wipe A
 .resume:
         push    de                                  ; Preserve the incoming settings
@@ -1033,6 +1033,7 @@ BDOS_F_CLOSE:
         ;; we don't need to do anything with the FCB passed in.... this is here as a reminder
         ;; if and when we start to support multiple open files, then we will need to use the 
         ;; FCB passed in to find the right file to close.
+
         ; call BDOS.cache_calling_fcb      ; cache FCB for use in kernel (mutate DE)
         call KERNEL_BDOS.close_file
         call KERNEL_BDOS.clear_current_fcb          ; Clear out current FCB
@@ -1044,6 +1045,8 @@ BDOS_F_CLOSE:
 ; The drive can be 0 to 15 for A to P, or '?' to mean current drive, leaves disk
 ; so that "search_for_next" get the next entry.
 BDOS_F_SFIRST:
+        call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
+.actual:
         ld      a, 0
         ld      (file_counter), a
         ld      a, (KERNEL_BDOS.current_esxdos.dir_handle)
@@ -1108,10 +1111,11 @@ BDOS_F_SNEXT:
 ; Delete file in DE's FCB. Return's 0 for success, 255 otherwise
 ;     Uses a lot of the same routines as DIR under the hood, to find files to delete.
 BDOS_F_DELETE:
+        call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
         ld      a, 255                              
         ld      (KERNEL_BDOS.current_esxdos.delete_flag), a; Store the result
         
-        ld      a, (de)                             ; Pop Drive Name into A
+        ld      a, (de)                             ; Put Drive Name into A
         ld      (KERNEL.dynamic_data.store_source), a; And then write it to somewhere safe
 
         push    de
@@ -1122,7 +1126,7 @@ BDOS_F_DELETE:
         push    de                                  ; Put FCB pointer back on stack
 
         ld      a, (BDOS.current_user)
-        call    BDOS_F_SFIRST
+        call    BDOS_F_SFIRST.actual
         
         push    af
         ld      a, (KERNEL_BDOS.current_esxdos.dir_handle); (not sure if I should be doing this here)
@@ -1314,6 +1318,7 @@ make_file_success:
         jp ret0_in_a
 
 BDOS_F_RENAME:
+        call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
     ; DE points to a FCB with the
     ; SOURCE filename at FCB+0 and
     ; TARGET filename at FCB+16.
@@ -1322,15 +1327,15 @@ BDOS_F_RENAME:
     ; Success a = 0
     ; Error a = 255
 
-   ld (dynamic_data.store_source), de                  ; Store source FCB pointer for now
-   push de
-   call KERNEL_BDOS.close_file                         ; just in case there is an open one.
-   pop de
+        ld (dynamic_data.store_source), de                  ; Store source FCB pointer for now
+        push de
+        call KERNEL_BDOS.close_file                         ; just in case there is an open one.
+        pop de
 
-   ld hl, 16
-   add hl, de
-   ld (BDOS.store_target), hl                               ; And store the target FCB for now
-   ex de, hl                                           ; target is now in de
+        ld hl, 16
+        add hl, de
+        ld (BDOS.store_target), hl                               ; And store the target FCB for now
+        ex de, hl                                           ; target is now in de
 
             m_kr_unimplimented BDOS_F_RENAME_string
 BDOS_F_RENAME_string:
