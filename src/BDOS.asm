@@ -67,10 +67,10 @@ internal_TEARDOWN.SMC_exitstack EQU $+1
 ; Copy FCB (pointed to by DE) to cache in BDOS
 ;   Source FCB can be anywhere in RAM. Should only be called by kernel operations.
 ;   Returns new FCB in DE, all other registers unchanged
-cache_current_fcb_for_kernel:
+cache_calling_fcb:
         push    af
         ; ld      (.SMC_SOURCE_FCB_COPY), de
-        ld      (restore_current_fcb_for_kernel.SMC_ORIGINAL_FCB_COPY), de
+        ld      (restore_calling_fcb.SMC_ORIGINAL_FCB_COPY), de
         push    bc      ; Save these ...
         push    hl      ; ... and restore later
         ex      de, hl
@@ -98,7 +98,7 @@ cache_current_fcb_for_kernel:
 
 ; Copy FCB from cache in BDOS to address on stack
 ;   Source FCB can be anywhere in RAM. Should only be called while kernel is paged in.
-restore_current_fcb_for_kernel:
+restore_calling_fcb:
         push     af
         push    de
         push    bc

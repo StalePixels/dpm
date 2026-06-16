@@ -229,15 +229,15 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      a, (KERNEL.dynamic_data.state.mmu4)         ; Get MMU3(userland3) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU4_userland), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_userland), a
-        ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU4_userland), a
-        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU4_userland), a
+        ld      (BDOS.cache_calling_fcb.SMC_MMU4_userland), a
+        ld      (BDOS.restore_calling_fcb.SMC_MMU4_userland), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_userland), a
         
         ld      a, (KERNEL.dynamic_data.state.mmu5)         ; Get MMU4(userland5) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU5_userland), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU5_userland), a
-        ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU5_userland), a
-        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU5_userland), a
+        ld      (BDOS.cache_calling_fcb.SMC_MMU5_userland), a
+        ld      (BDOS.restore_calling_fcb.SMC_MMU5_userland), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_userland), a
         
         ;ld      a, (KERNEL.dynamic_data.state.mmu6)         ; Get MMU6(userland6) and patch the following
@@ -247,16 +247,16 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      a, (KERNEL.dynamic_data.state.kernel0)      ; Get MMU3(kernel0) and patch the following
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU4_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_kernel), a
-        ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU4_kernel), a
-        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU4_kernel), a
+        ld      (BDOS.cache_calling_fcb.SMC_MMU4_kernel), a
+        ld      (BDOS.restore_calling_fcb.SMC_MMU4_kernel), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_kernel), a
         
         ld      a, (KERNEL.dynamic_data.state.kernel1)      ; Get MMU4(kernel1) and patch the following
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU5_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU5_kernel), a
-        ld      (BDOS.cache_current_fcb_for_kernel.SMC_MMU5_kernel), a
-        ld      (BDOS.restore_current_fcb_for_kernel.SMC_MMU5_kernel), a
+        ld      (BDOS.cache_calling_fcb.SMC_MMU5_kernel), a
+        ld      (BDOS.restore_calling_fcb.SMC_MMU5_kernel), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU5_kernel), a
         
@@ -985,7 +985,7 @@ BDOS_DRV_SET:
 ; The FCB that was passed in gets copied into the Current_FCB so we know which file is open.
 ;  Return a = 0 for success, a = 255 for error.
 BDOS_F_OPEN:
-        call    BDOS.cache_current_fcb_for_kernel ; Userland call, cache FCB for use in kernel
+        call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
 .kernel_entry:
         xor     a                                   ; Wipe A
 .resume:
@@ -1033,7 +1033,7 @@ BDOS_F_CLOSE:
         ;; we don't need to do anything with the FCB passed in.... this is here as a reminder
         ;; if and when we start to support multiple open files, then we will need to use the 
         ;; FCB passed in to find the right file to close.
-        ; call BDOS.cache_current_fcb_for_kernel      ; cache FCB for use in kernel (mutate DE)
+        ; call BDOS.cache_calling_fcb      ; cache FCB for use in kernel (mutate DE)
         call KERNEL_BDOS.close_file
         call KERNEL_BDOS.clear_current_fcb          ; Clear out current FCB
         jp ret0_in_a
@@ -1159,7 +1159,7 @@ BDOS_F_DELETE:
 ;     When <128 bytes, remainder is padded with NULLs, updates Current_FCB
 ;     pointer values with every read.
 BDOS_F_READ:
-        call    BDOS.cache_current_fcb_for_kernel ; Userland call, cache FCB for use in kernel (mutate DE)
+        call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel (mutate DE)
         push    de                                  ; Keep the DE
                         ; call KERNEL_DEBUG.print_crlf
                         ; ld hl, KERNEL_DEBUG.read__string : call KERNEL.kr_print_string_hl
@@ -1666,7 +1666,7 @@ BDOS_48:
 ;-----------------------------------------------------------------------------
 
 restore_fcp_ret0_in_a:
-        call BDOS.restore_current_fcb_for_kernel
+        call BDOS.restore_calling_fcb
 ret0_in_a:
         xor a                                           ; a = 0
         ld b, a
