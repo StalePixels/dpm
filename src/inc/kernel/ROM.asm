@@ -1327,40 +1327,43 @@ BDOS_F_RENAME:
     ; Success a = 0
     ; Error a = 255
 
-        ld (dynamic_data.store_source), de                  ; Store source FCB pointer for now
+        ld dynamic_data.store_source, de        ; Store source FCB pointer for now
         push de
-        call KERNEL_BDOS.close_file                         ; just in case there is an open one.
+        call KERNEL_BDOS.close_file             ; just in case there is an open one.
         pop de
 
         ld hl, 16
         add hl, de
-        ld (BDOS.store_target), hl                               ; And store the target FCB for now
-        ex de, hl                                           ; target is now in de
+        ld (BDOS.store_target), hl              ; And store the target FCB for now
+        ex de, hl                               ; target is now in de
 
-            m_kr_unimplimented BDOS_F_RENAME_string
-BDOS_F_RENAME_string:
-        DB "BDOS_F_RENAME", 0
 
     ; Check if target drive is "default", if so, copy from source.
-;    ld hl, (store_target)                           ; retrieve pointer to target file
-;    ld a, (hl)                                      ; Target file drive letter
-;    cp 0                                            ; Is the target of the default drive?
-;    jr nz, entry_Rename_target_not_default           ; This indicates it should be the same as the source
-;    ld de, (store_source)
-;    ld a, (de)
-;    ld (hl), a                                      ; Copy drive from source to target
+    ;  - this is "implied same", so rename permitted.
+        ld hl, (BDOS.store_target)              ; retrieve pointer to target file
+        ld a, (hl)                              ; Target file drive letter
+        cp 0                                    ; Is target 0, aka default drive?
+        jr nz, entry_Rename_target_not_default  ; Yes, so same as source
+        ld de, (KERNEL.dynamic_data.store_source); DE points to source FCB again
+        ld a, (de)                              ; A = source drive letter
+        ld (hl), a                              ; Copy drive from source to target
 
-entry_Rename_target_not_default:
+.entry_Rename_target_not_default:
     ; Check if both drives are the same. If not return error.
-;    ld hl, (store_target)
-;    ld a, (hl)                                      ; Get target drive
-;    ld hl, (store_source)                           ; retrieve source fcb
-;    cp (hl)                                         ; Are drive letters the same?
-;    jr nz, entry_Rename_File_different_drives
+        ld hl, (BDOS.store_target)              ; retrieve pointer to target file
+        ld a, (hl)                              ; Target file drive letter
+        ld hl, (KERNEL.dynamic_data.store_source); retrieve source fcb
+        cp (hl)                                 ; Are drive letters the same?
+        jr nz, entry_Rename_File_different_drives
 
     ; Try opening target file. If we can then return an error.
-;    ld de, (store_target)
-;    call copy_fcb_to_filename_buffer
+        ld de, (BDOS.store_target)
+        call KERNEL_BDOS.copy_fcb_to_buffers
+
+// ^ ^ ^ This is me doing things via CP/M styles, but it's much quicker
+//       if I was to just use ESXDOS direct for these internal file ops.
+
+        // STILL OLD CODE
 ;    call open_cpm_disk_directory
 ;    ld hl, filename_buffer+2                        ; Specify filename
 ;    call CORE_open_file
@@ -1392,6 +1395,10 @@ entry_Rename_File_same_drives:
 
     ; Close the file.
 ;    call KERNEL_BDOS.close_file
+
+            m_kr_unimplimented BDOS_F_RENAME_string
+BDOS_F_RENAME_string:
+        DB "BDOS_F_RENAME", 0
 
 ;    call clear_current_fcb                          ; Clear out current FCB
         jp ret0_in_a                                ; success
