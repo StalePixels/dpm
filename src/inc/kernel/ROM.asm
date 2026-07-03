@@ -1356,12 +1356,31 @@ BDOS_F_RENAME:
         cp (hl)                                 ; Are drive letters the same?
         jr nz, entry_Rename_File_different_drives
 
-    ; Try opening target file. If we can then return an error.
-        ld de, (BDOS.store_target)
-        call KERNEL_BDOS.copy_fcb_to_buffers
 
-// ^ ^ ^ This is me doing things via CP/M styles, but it's much quicker
-//       if I was to just use ESXDOS direct for these internal file ops.
+
+
+// just use ESXDOS direct for these internal file ops.
+// THE NEW WAY, COPIED FROM THE EXISTING OPEN ROUTINE
+        push    de                                          ; Stash FCB
+        call    KERNEL_BDOS.copy_fcb_to_buffers             ;  Copy drivepath and drive name out of FCB
+        call    KERNEL_BDOS.copy_buffers_to_fullpath        ; Create an ESXDOS access path
+
+        // DRS - check the drivespec stuff - is this next comment true?
+
+        ld      a, '*'                                      ; Not important, filepath overrides it.
+        ld      hl, KERNEL_BDOS.current_esxdos.fullpath     ; Full path of file to get stats
+        m_kr_esxdos F_OPEN
+        jr      c, .not_exist
+        push    af                                          ; Preserve file-handle
+        ld      hl, KERNEL_BDOS.current_esxdos.stats        ; 11byte stats buffer
+        m_kr_esxdos F_FSTAT
+        pop     af                                          ; Restore file-handle
+        push    bc
+        push    de
+        m_kr_esxdos F_CLOSE
+        pop     de
+        pop     bc
+// END OF THE NEW WAY
 
         // STILL OLD CODE
 ;    call open_cpm_disk_directory
