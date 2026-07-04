@@ -1348,16 +1348,6 @@ BDOS_F_RENAME:
         ld a, (de)                              ; A = source drive letter
         ld (hl), a                              ; Copy drive from source to target
 
-.entry_Rename_target_not_default:
-    ; Check if both drives are the same. If not return error.
-        ld hl, (BDOS.store_target)              ; retrieve pointer to target file
-        ld a, (hl)                              ; Target file drive letter
-        ld hl, (KERNEL.dynamic_data.store_source); retrieve source fcb
-        cp (hl)                                 ; Are drive letters the same?
-        jr nz, entry_Rename_File_different_drives
-
-
-
 
 // just use ESXDOS direct for these internal file ops.
 // THE NEW WAY, COPIED FROM THE EXISTING OPEN ROUTINE
