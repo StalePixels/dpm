@@ -40,7 +40,7 @@ MAME_RUN:=$(MAME) $(MAME_SYS) -hard1 $(IMAGE) \
 		-window -nomaximize -resolution 1024x768 -nothrottle \
 		-debug -plugin nextbreak,debugstart,nextfaststart
 
-.PHONY: dev emulate turbo dot ccp install_emu autoexec mount_image unmount_image \
+.PHONY: dev emulate turbo dot ccp exit install_emu autoexec mount_image unmount_image \
         cspect cspect_turbo setup_emulator setup_emulator_testfiles \
         _setup_dirs _setup_files
 
@@ -71,7 +71,12 @@ dot:
 ccp:
 	cd src && $(SJASMPLUS) CCP.asm
 
-# Mount the image, copy the freshly built dot and CCP.COM in, then unmount so
+# EXIT.COM, the CP/M program that ends DP/M. install_emu puts it on drive A,
+# user 0.
+exit:
+	cd src && $(SJASMPLUS) EXIT.asm
+
+# Mount the image, copy the freshly built dot, CCP.COM and EXIT.COM in, then unmount so
 # the image is free for MAME (macOS and MAME must not hold the FAT volume at
 # once).
 install_emu:
@@ -80,6 +85,8 @@ install_emu:
 	$(CP) build/DPM $(DOT_DIR)/DPM
 	$(MKDIR) $(EMU_PATH)
 	$(CP) build/CCP.COM $(EMU_PATH)/CCP.COM
+	$(MKDIR) $(EMU_PATH)/A/0
+	$(CP) build/EXIT.COM $(EMU_PATH)/A/0/EXIT.COM
 	$(HDIUTIL) detach $(MOUNT)
 
 # Tokenise dev/autoexec.bas.txt and install it onto the image as the boot
@@ -100,7 +107,7 @@ mount_image:
 unmount_image:
 	$(HDIUTIL) detach $(MOUNT)
 
-dev: dot ccp install_emu turbo
+dev: dot ccp exit install_emu turbo
 
 # Mount the image, create the CP/M drive tree (C:/DPM/{A,B}/{0..15}) that the
 # kernel's setup probes with F_OPENDIR, then unmount. (_setup_dirs does the

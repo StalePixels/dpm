@@ -21,6 +21,9 @@ IOBYTE_A        EQU     $0003       ;i/o byte location
 USERDRIVE_A     EQU     $0004       ;User/Drive flags
 BDOSPTR_A       EQU     $0006       ;address field of jmp BDOS
 
+    ;; BIOS entry that ends DP/M, as an offset from the warm boot address at $0001
+BIOS_EXIT_OFS   EQU     84
+
 TBUFF_A         EQU     $0080       ; DEFAULT DISK I/O BUFFER
 TFCB_A          EQU     $005C       ; DEFAULT FCB BUFFER
 TPA_A           EQU     $0100       ; BASE OF TPA

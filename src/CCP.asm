@@ -55,6 +55,8 @@
 ;        also, the '>' is not printed until all preprocessing is completed
 ;    N.    The TYPE and LIST Commands mask the MSB of each byte, so that
 ;        files created by editors such as EDIT80 are "printable"
+;    O.    An EXIT Command ends DP/M and returns to NextZXOS, through the
+;        exit entry in DP/M's BIOS jump table (BIOS_EXIT_OFS)
 
 ;    DP/M ASSEMBLY *****
 ;    This file is assembled on its own into CCP.COM, an image of the CCP at
@@ -610,7 +612,7 @@ PARSECMD:
 ;    CCP    BUILT-IN COMMAND TABLE AND COMMAND PROCESSOR
 ;    
 ; Number of built-in commands in the CCP
-NUMCMDS:    EQU    8
+NUMCMDS:    EQU    9
 ; Number of unique characters to check for built-in commands (padded with spaces)
 CMDS_LEN:    EQU    4
 
@@ -624,6 +626,7 @@ CMDS_TBL:
         db      'REN '
         db      'USER'
         db      'CLS '
+        db      'EXIT'
         
 ; CCP Built-in command function addresses
 PROC_TBL:    
@@ -635,6 +638,7 @@ PROC_TBL:
         dw      CMD_REN
         dw      CMD_USER
         dw      CMD_CLS
+        dw      CMD_EXIT
         dw      RUN_COM             ; Not a built-in command, execute a .COM file
         
 ; Scan CMDS_TBL, on return A=Entry (0 to NUMCMDS-1) or NUMCMDS if not found (COM file)
@@ -1234,6 +1238,14 @@ CMD_CLS:
         ld      a, 27  : call CONOUT        ; Clear to end of screen
         ld      a, 'J' : call CONOUT
         jp      RESTART_CCP.drive_changed        ; RESTART CCP (NO DEFAULT LOGIN)
+
+; End DP/M and return to NextZXOS through DP/M's exit entry in the BIOS jump
+; table, found from the warm boot address at $0001, as EXIT.COM does
+CMD_EXIT:
+        ld      hl, (REBOOT_A+1)    ; The BIOS warm boot entry
+        ld      de, BIOS_EXIT_OFS
+        add     hl, de
+        jp      (hl)                ; Does not return
         
 ;    
 ;    NOT    CCP-RESIDENT COMMAND -- PROCESS AS TRANSCIENT

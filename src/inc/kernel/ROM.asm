@@ -51,6 +51,35 @@ m_kr_esxdos    MACRO   func
 ;; Setup VM environment, colours, etc. - take over from NextZXOS
 setup:                                   ; DPM starting up - initialise hardware & drives for the VM
 
+        ;; Save every NextReg that setup changes, before anything can fail,
+        ;; so exit puts back the values NextZXOS had however DP/M ends
+        m_NextRegRead_c TILEMAP_BASE_ADR_NR_6E; Read current tilemap base address
+        ld      (exit.SMC_tilemap_base_adr), a; Save current address
+        m_NextRegRead_c TILEMAP_GFX_ADR_NR_6F ; Read current tile definitions address
+        ld      (exit.SMC_tilemap_gfx_adr), a; Save current address
+        m_NextRegRead_c GLOBAL_TRANSPARENCY_NR_14; Read current global transparency
+        ld      (exit.SMC_global_transparency), a; Save current transparency
+        m_NextRegRead_c TRANSPARENCY_FALLBACK_COL_NR_4A; Read current fallback colour
+        ld      (exit.SMC_fallback_colour), a; Save current fallback colour
+        m_NextRegRead_c TILEMAP_CONTROL_NR_6B; Read tilemap control
+        ld      (exit.SMC_tilemap_ctrl), a; Save tilemap control
+        m_NextRegRead_c PALETTE_CONTROL_NR_43; Read palette control
+        ld      (exit.SMC_palette_ctrl), a; Save palette control
+        m_NextRegRead_c PALETTE_INDEX_NR_40 ; Read palette index
+        ld      (exit.SMC_palette_index), a; Save palette index
+        
+        nextreg PALETTE_CONTROL_NR_43, 0x30 ; Tilemap first palette
+        nextreg PALETTE_INDEX_NR_40, 0      ; Colour 0, all 9 bits ($41 reads bits 8-1, $44 bit 0)
+        m_NextRegRead_c PALETTE_VALUE_NR_41
+        ld      (exit.SMC_tilemap_palette_0), a
+        m_NextRegRead_c PALETTE_VALUE_9BIT_NR_44
+        ld      (exit.SMC_tilemap_palette_0_lsb), a
+        nextreg PALETTE_INDEX_NR_40, 1      ; Colour 1, a read does not move the index
+        m_NextRegRead_c PALETTE_VALUE_NR_41
+        ld      (exit.SMC_tilemap_palette_1), a
+        m_NextRegRead_c PALETTE_VALUE_9BIT_NR_44
+        ld      (exit.SMC_tilemap_palette_1_lsb), a
+
 .load_config:
         /* 
         ;; remember to check path ends with '/'
@@ -170,7 +199,8 @@ setup:                                   ; DPM starting up - initialise hardware
 .b_tenplus_usernumber
         pop     hl                                  ; Restore end of string pointer
         ld      (hl), '1'
-        push    hl                                  ; Keep new EoString safe, so we can use it again
+        inc     hl
+        push    hl                                 ; Keep new EoString safe, so we can use it again
         ld      a, '0'                              ; First user number, in ASCII
 .b_test_tenplus_usernumber
         push    af
@@ -203,11 +233,18 @@ setup:                                   ; DPM starting up - initialise hardware
         
         jr .setup_hardware
 
+        ;; A drive folder is missing: DP/M ends and NextZXOS shows
+        ;; "Missing folder " and its path as the dot command's error
 .config_error:
-        ; pop     af : pop hl : pop hl
-        ld a, 0x0D : m_PrintCharInA
-        m_PrintMsg KERNEL.strings.error            ; Display "ERROR"
-        m_CSpect_BREAK;jr $
+        ld      hl, @error_report
+        ld      de, @DotErr.MissingFolder
+        call    strcpy
+        ld      de, dynamic_data.working_path
+        call    strcpy
+        dec     hl                          ; Last character of the path
+        set     7, (hl)                     ; marks the end of the message
+        ld      hl, @error_report
+        jp      @kernel_error_exit          ; Resets the stack
         
 .setup_hardware:
         ld      (KERNEL.dynamic_data.dot_stack), sp ;Preserve dotcommand stack pointer for exit of kernel
@@ -315,24 +352,15 @@ setup:                                   ; DPM starting up - initialise hardware
         call KERNEL_TERM.clear                ; Clear entire tilemap
         
         ;;  Setup textmodes, graphics settings, colours, transparency, etc.
-        m_NextRegRead_c CPU_SPEED_NR_07       ; Read current tilemap base address
-        ld      (exit.SMC_tilemap_base_adr), a; Save current address
+        ;;  The values these replace were saved at the start of setup
         nextreg TILEMAP_BASE_ADR_NR_6E, tilemapHiByte; Tilemap base address high byte
         
-        m_NextRegRead_c TILEMAP_GFX_ADR_NR_6F ; Read current tilemap base address
-        ld      (exit.SMC_tilemap_gfx_adr), a; Save current address
         nextreg TILEMAP_GFX_ADR_NR_6F, 0x5C ; Tile dataaddress at 0x6C00, ASCII @ 0x5D00
         
-        m_NextRegRead_c GLOBAL_TRANSPARENCY_NR_14; Read current tilemap base address
-        ld      (exit.SMC_global_transparency), a; Save current address
         nextreg GLOBAL_TRANSPARENCY_NR_14, 0x00; Confirm that the transparency is E3
         
-        m_NextRegRead_c TRANSPARENCY_FALLBACK_COL_NR_4A; Read currenrt fallback colour
-        ld      (exit.SMC_fallback_colour), a; Save current fallback colour
         nextreg TRANSPARENCY_FALLBACK_COL_NR_4A, 0x00; Set the fallback colour to black
         
-        m_NextRegRead_c TILEMAP_CONTROL_NR_6B; Read tilemap control
-        ld      (exit.SMC_tilemap_ctrl), a; Save tilemap control
         nextreg TILEMAP_CONTROL_NR_6B, 0b11101010; Set tilemap control
         /*                               | | | | bit 0 = Tilemap on top of ULA
                                          | | | +-bit 1 = 512 tile mode
@@ -345,13 +373,6 @@ setup:                                   ; DPM starting up - initialise hardware
         
         nextreg     PALETTE_CONTROL_NR_43, 0x30; Tilemap primary palette
         nextreg     PALETTE_INDEX_NR_40, 0; Set palette place to first entry
-        
-        m_NextRegRead_c   PALETTE_VALUE_NR_41
-        ld      (exit.SMC_tilemap_palette_0), a; Save current colour 0
-        m_NextRegRead_c   PALETTE_VALUE_NR_41
-        ld      (exit.SMC_tilemap_palette_1), a; Save current colour 1
-        
-        nextreg     PALETTE_INDEX_NR_40, 0; Reset palette place to first entry
         nextreg     PALETTE_VALUE_NR_41, 0x00       ;     Set new colour 0: Black
         nextreg     PALETTE_VALUE_NR_41, 0b00011100 ;     Set new colour 1: Green
         
@@ -398,10 +419,10 @@ page_zero_jumps:
 ;; Shutdown kernel services, revert hardware to NextZXOS settings
 exit:                                    ; DPM exiting - safely shut down the VM changes
 .SMC_tilemap_base_adr EQU $+3:
-        nextreg TILEMAP_BASE_ADR_NR_6E, 0xAA; Restore original CPU speed using the SMC trick again.
+        nextreg TILEMAP_BASE_ADR_NR_6E, 0xAA; Restore tilemap base address using the SMC trick again.
         
 .SMC_tilemap_gfx_adr EQU $+3:
-        nextreg TILEMAP_GFX_ADR_NR_6F, 0xAA; Restore original CPU speed using the SMC trick again.
+        nextreg TILEMAP_GFX_ADR_NR_6F, 0xAA; Restore tile definitions address using the SMC trick again.
         
 .SMC_global_transparency EQU $+3:
         nextreg GLOBAL_TRANSPARENCY_NR_14, 0xAA; Restore global transparency.
@@ -412,12 +433,20 @@ exit:                                    ; DPM exiting - safely shut down the VM
 .SMC_tilemap_ctrl EQU $+3:
         nextreg TILEMAP_CONTROL_NR_6B, 0xAA; Restore tilemap control
         
-        nextreg     PALETTE_CONTROL_NR_43, 0x30; Tilemap primary palette
+        nextreg     PALETTE_CONTROL_NR_43, 0x30; Tilemap primary palette, index moves on after each colour
         nextreg     PALETTE_INDEX_NR_40, 0; First Entry
 .SMC_tilemap_palette_0 EQU $+3:
-        nextreg     PALETTE_VALUE_NR_41, 0xAA       ;     Black
+        nextreg     PALETTE_VALUE_9BIT_NR_44, 0xAA  ;     Colour 0, bits 8-1
+.SMC_tilemap_palette_0_lsb EQU $+3:
+        nextreg     PALETTE_VALUE_9BIT_NR_44, 0xAA  ;     Colour 0, bit 0
 .SMC_tilemap_palette_1 EQU $+3:
-        nextreg     PALETTE_VALUE_NR_41, 0xAA       ;     Green
+        nextreg     PALETTE_VALUE_9BIT_NR_44, 0xAA  ;     Colour 1, bits 8-1
+.SMC_tilemap_palette_1_lsb EQU $+3:
+        nextreg     PALETTE_VALUE_9BIT_NR_44, 0xAA  ;     Colour 1, bit 0
+.SMC_palette_ctrl EQU $+3:
+        nextreg     PALETTE_CONTROL_NR_43, 0xAA; Restore palette control
+.SMC_palette_index EQU $+3:
+        nextreg     PALETTE_INDEX_NR_40, 0xAA; Restore palette index
         ret
 
 ;-----------------------------------------------------------------------------
@@ -654,14 +683,14 @@ load_ccp:
 ; NextZXOS shows "Cannot load " and the path as the dot command's error.
 ccp_load_error:
         call    enable_esxdos_rom           ; The dot command's RAM at $2000, for the message and exit code
-        ld      hl, @ccp_error
+        ld      hl, @error_report
         ld      de, @DotErr.CannotLoad
         call    strcpy
         ld      de, dynamic_data.working_path
         call    strcpy
         dec     hl                          ; Last character of the path
         set     7, (hl)                     ; marks the end of the message
-        ld      hl, @ccp_error
+        ld      hl, @error_report
         jp      @kernel_error_exit
 
 ;
@@ -789,10 +818,14 @@ BIOS_SECTRAN:
 SECTRAN_string:
         DB "BIOS_SECTRAN", 0
 ;
-USERF
-        m_kr_unimplimented USERF_string
-USERF_string:
-        DB "BIOS_USERF", 0
+; End DP/M: close every open file and the directory search, then leave
+; through the dot command's exit path as a normal exit, with no error
+; report. Does not return.
+BIOS_EXIT:
+        call    KERNEL_BDOS.handle_close_all
+        call    KERNEL_BDOS.search_close
+        call    enable_esxdos_rom           ; The dot command's RAM at $2000, for its exit path
+        jp      @kernel_exit
 
 
 ;

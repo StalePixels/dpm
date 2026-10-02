@@ -39,19 +39,25 @@ WBOOTE
         jp      entry_WRITE         ;14;39: Write a sector
         jp      entry_LISTST        ;15:42: Status of list device
         jp      entry_SECTRAN       ;16:45: Sector translation for skewing
-        ; ret : nop : nop             ;17:48: NOP
-        ; ret : nop : nop             ;18:51: NOP
-        ; ret : nop : nop             ;19:54: NOP
-        ; ret : nop : nop             ;20:57: NOP
-        ; ret : nop : nop             ;21:60: NOP
-        ; ret : nop : nop             ;22:63: NOP
-        ; ret : nop : nop             ;23:66: NOP
-        ; ret : nop : nop             ;24:69: NOP
-        ; ret : nop : nop             ;25:72: NOP
-        ; ret : nop : nop             ;26:75: NOP
-        ; ret : nop : nop             ;27:78: NOP
-        ; ret : nop : nop             ;28:81: NOP
-        ; jp      entry_USERF         ;29:84: User Function
+        ; Entries 17 to 28 return at once. Entry 29 is DP/M's own: it ends
+        ; DP/M and returns to NextZXOS. It sits in the slot kept for the user
+        ; function, WBOOTE+BIOS_EXIT_OFS, where EXIT.COM and the CCP's EXIT
+        ; find it from the warm boot address at $0001.
+        ret : nop : nop             ;17:48: NOP
+        ret : nop : nop             ;18:51: NOP
+        ret : nop : nop             ;19:54: NOP
+        ret : nop : nop             ;20:57: NOP
+        ret : nop : nop             ;21:60: NOP
+        ret : nop : nop             ;22:63: NOP
+        ret : nop : nop             ;23:66: NOP
+        ret : nop : nop             ;24:69: NOP
+        ret : nop : nop             ;25:72: NOP
+        ret : nop : nop             ;26:75: NOP
+        ret : nop : nop             ;27:78: NOP
+        ret : nop : nop             ;28:81: NOP
+EXITE
+        jp      entry_EXIT          ;29:84: Exit DP/M to NextZXOS
+        ASSERT  EXITE-WBOOTE == BIOS_EXIT_OFS
         
 // Private BIOS routine to call internal Kernel BDOS function
 //  function address passed in hl, params in DE
@@ -160,8 +166,8 @@ entry_LISTST:                       ;42: Status of list device
 entry_SECTRAN:                      ;45: Sector translation for skewing
         m_BIOSStackAndCall KERNEL.BIOS_SECTRAN
         
-; entry_USERF:                      ;82: User Functions (aka machine specific)
-;         m_BIOSStackAndCall KERNEL.USERF
+entry_EXIT:                         ;84: Close every open file, end DP/M, return to NextZXOS
+        m_BIOSStackAndCall KERNEL.BIOS_EXIT
 
 kr_stack:
     DW  0xAAAA                  ; This is what the stack was when the kernel passed control to CP/M

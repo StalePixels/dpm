@@ -77,6 +77,19 @@ backup_state:
         ld      (state_exit.SMC_border), a  ; restore it later at exit
         xor     a : out     (ULA_P_FE), a   ; Set the border black
 
+        m_NextRegRead_c MMU2_4000_NR_52     ; Save MMU slots 2-7, so memmap_exit
+        ld      (memmap_exit.SMC_slot2), a  ; puts back the pages NextZXOS had there
+        m_NextRegRead_c MMU3_6000_NR_53
+        ld      (memmap_exit.SMC_slot3), a
+        m_NextRegRead_c MMU4_8000_NR_54
+        ld      (memmap_exit.SMC_slot4), a
+        m_NextRegRead_c MMU5_A000_NR_55
+        ld      (memmap_exit.SMC_slot5), a
+        m_NextRegRead_c MMU6_C000_NR_56
+        ld      (memmap_exit.SMC_slot6), a
+        m_NextRegRead_c MMU7_E000_NR_57
+        ld      (memmap_exit.SMC_slot7), a
+
     ;;check_freemem:
         call    zxn_AvailablePages          ; Number of pages available returned in A
         ;; Check how many free memory available - error out if less than 96KB
@@ -243,6 +256,14 @@ kernel_error_exit:
         scf                                 ; Carry flag signifies the error
         jr      bootrom_exit
 
+;-----------------------------------------------------------------------------
+; -- Exit to NextZXOS from the kernel with no error. Entered as
+;    kernel_error_exit is, with no message.
+;-----------------------------------------------------------------------------
+kernel_exit:
+        ld      sp, dot_stack               ; A stack that stays mapped while the MMUs are restored
+        jr      clean_exit
+
 exit_kernel:
 .SMC_dotstack EQU $+1
         ld      sp, 0xAAAA                  ; restore original stack pointer, as above 0xAAAA is SMC.
@@ -266,8 +287,10 @@ memmap_exit:
                                         ; Restore first half to rightful MMU slots
         nextreg	MMU0_0000_NR_50, 0xFF
         nextreg	MMU1_2000_NR_51, 0xFF
-        nextreg	MMU2_4000_NR_52, 0x0A
-        nextreg	MMU3_6000_NR_53, 0x0B
+.SMC_slot2 EQU $+3
+        nextreg	MMU2_4000_NR_52, 0xAA       ; 0xAA replaced at startup with the page NextZXOS had
+.SMC_slot3 EQU $+3
+        nextreg	MMU3_6000_NR_53, 0xAA
                                         ; Restore the stuff we backed up
         ld      a, (state.mmu2backup)     ; Backup of Sysvars, ULA, etc.
         nextreg	MMU4_8000_NR_54, a          ; Page in .SMC_bank1 
@@ -283,10 +306,14 @@ memmap_exit:
         ld      bc, $2000;                  ; Length of Copy
         ldir                                ; ldi repeat. Restore to original location
                                         ; Restore second half to rightful MMU slots
-        nextreg	MMU4_8000_NR_54, 0x04
-        nextreg	MMU5_A000_NR_55, 0x05
-        nextreg	MMU6_C000_NR_56, 0x00
-        nextreg	MMU7_E000_NR_57, 0x01
+.SMC_slot4 EQU $+3
+        nextreg	MMU4_8000_NR_54, 0xAA       ; 0xAA replaced at startup with the page NextZXOS had
+.SMC_slot5 EQU $+3
+        nextreg	MMU5_A000_NR_55, 0xAA
+.SMC_slot6 EQU $+3
+        nextreg	MMU6_C000_NR_56, 0xAA
+.SMC_slot7 EQU $+3
+        nextreg	MMU7_E000_NR_57, 0xAA
         
 mem_exit:
         push    af                          ; Preserve the flags, and A, for exit routine
@@ -390,8 +417,8 @@ end_state:
 command_buffer:
     DS  262, $AA                            ; 128bytes of stack set to $AA for to aide debugging
 
-ccp_error:                              ; Error report built by the kernel when CCP.COM cannot be loaded
-    DS  DotErr.CannotLoadLen+ESXDOS_MAX_PATH_LENGTH, $00
+error_report:                           ; Error report built by the kernel: a DotErr prefix and a path
+    DS  DotErr.PrefixMax+ESXDOS_MAX_PATH_LENGTH, $00
     
 dot_end:                                   ; after last machine code byte which should be part of the binary
 ;; Meta stuffs for build

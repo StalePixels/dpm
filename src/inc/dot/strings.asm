@@ -39,4 +39,10 @@ NotEnoughMemory:
 CannotLoad:                             ; The kernel adds the CCP's path (Null Term)
         DB      "Cannot load ", 0
 CannotLoadLen   EQU     $-CannotLoad-1
+MissingFolder:                          ; The kernel adds the drive folder's path (Null Term)
+        DB      "Missing folder ", 0
+MissingFolderLen EQU    $-MissingFolder-1
+PrefixMax       EQU     16              ; Room for the longest prefix above, in error_report
+        ASSERT  CannotLoadLen <= PrefixMax
+        ASSERT  MissingFolderLen <= PrefixMax
     ENDMODULE
