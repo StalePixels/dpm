@@ -84,6 +84,20 @@ esx_mode_open_creat             EQU     $08
 esx_mode_creat_noexist          EQU     $04
 esx_mode_creat_trunc            EQU     $0c
 
+;; B and C for F_CHMOD - add together any of:
+esx_attr_write                  EQU     $01     ; Writable; clear for a read-only file
+esx_attr_hidden                 EQU     $02
+esx_attr_system                 EQU     $04
+esx_attr_archive                EQU     $20
+esx_attr_read                   EQU     $80
+
+;; File attributes byte (MS-DOS format) from F_STAT, F_FSTAT and F_READDIR
+fat_attr_readonly               EQU     $01
+fat_attr_hidden                 EQU     $02
+fat_attr_system                 EQU     $04
+fat_attr_volume                 EQU     $08
+fat_attr_directory              EQU     $10
+
 esx_seek_set                    EQU     $00
 esx_seek_fwd                    EQU     $01
 esx_seek_bwd                    EQU     $02

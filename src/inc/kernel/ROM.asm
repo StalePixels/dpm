@@ -13,7 +13,8 @@ m_kr_unimplimented MACRO func_name
         ld      hl, func_name
         call    kr_print_string_hl
         m_CSpect_BREAK
-        jr $
+        ld      hl, $00FF                   ; Unimplemented calls return A=L=$FF, B=H=0
+        jp      ret255_in_a
     ENDM
 m_kr_fatal MACRO func_name
         call    kr_print_error
@@ -229,16 +230,22 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      a, (KERNEL.dynamic_data.state.mmu4)         ; Get MMU3(userland3) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU4_userland), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_userland), a
+        ld      (BDOS.entry.SMC_MMU4_userland), a
         ld      (BDOS.cache_calling_fcb.SMC_MMU4_userland), a
         ld      (BDOS.restore_calling_fcb.SMC_MMU4_userland), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_userland), a
+        ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_userland), a
+        ld      (BDOS.copy_userland.SMC_MMU4_userland), a
         
         ld      a, (KERNEL.dynamic_data.state.mmu5)         ; Get MMU4(userland5) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU5_userland), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU5_userland), a
+        ld      (BDOS.entry.SMC_MMU5_userland), a
         ld      (BDOS.cache_calling_fcb.SMC_MMU5_userland), a
         ld      (BDOS.restore_calling_fcb.SMC_MMU5_userland), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_userland), a
+        ld      (BDOS.copy_dma_in_kernel.SMC_MMU5_userland), a
+        ld      (BDOS.copy_userland.SMC_MMU5_userland), a
         
         ;ld      a, (KERNEL.dynamic_data.state.mmu6)         ; Get MMU6(userland6) and patch the following
         
@@ -247,18 +254,22 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      a, (KERNEL.dynamic_data.state.kernel0)      ; Get MMU3(kernel0) and patch the following
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU4_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_kernel), a
+        ld      (BDOS.entry.SMC_MMU4_kernel), a
         ld      (BDOS.cache_calling_fcb.SMC_MMU4_kernel), a
         ld      (BDOS.restore_calling_fcb.SMC_MMU4_kernel), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_kernel), a
+        ld      (BDOS.copy_userland.SMC_MMU4_kernel), a
         
         ld      a, (KERNEL.dynamic_data.state.kernel1)      ; Get MMU4(kernel1) and patch the following
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU5_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU5_kernel), a
+        ld      (BDOS.entry.SMC_MMU5_kernel), a
         ld      (BDOS.cache_calling_fcb.SMC_MMU5_kernel), a
         ld      (BDOS.restore_calling_fcb.SMC_MMU5_kernel), a
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU5_kernel), a
+        ld      (BDOS.copy_userland.SMC_MMU5_kernel), a
         
         ;; Store the DivMMC RAM control port so we can map/unmap it
         in      a, DIVMMC_CONTROL_P_E3          ; Get the current DivMMC mapping
@@ -355,18 +366,10 @@ setup:                                   ; DPM starting up - initialise hardware
         nextreg	MMU0_0000_NR_50, a          ; Page in kernel0 (0x8000)
         ld      a, (dynamic_data.state.mmu1)
         nextreg	MMU1_2000_NR_51, a          ; Page in kernel0 (0x8000)
-            ; JP BIOS-warm-boot, 0,   0,   JP BDOS
-            ; $C3, $03, $FA,     $00, $00, $C3, $00, $E0
-        ld      a, $C3                  ; $C3  == JP instruction
-        ld      (REBOOT_A), a           ; BIOS jump
-        ld      ($0005), a              ; BDOS jump
-        ld      hl, BIOS.WBOOTE         ; BIOS warm boot entry point (not jump table)
-        ld      ($0001), hl             ; Undocumented instruction! Copy HL to addr.
-        ld      a, $00                  ; $00
-        ld      ($0003), a              ; 
-        ld      ($0004), a              ; User Number in Top Nybble, Disk in Low Nybble
-        ld      hl, BDOS.entry          ; BDOS entry point
-        ld      (BDOSPTR_A), hl         ; Undocumented instruction! Copy HL to addr.
+        call    page_zero_jumps
+        xor     a
+        ld      (IOBYTE_A), a           ; IOBYTE
+        ld      (USERDRIVE_A), a        ; User Number in Top Nybble, Disk in Low Nybble
         
 .setup_exit
         ;; Finish the Kernel/ROM handler, return back to DotCommand - which will exit to NextZXOS
@@ -377,6 +380,21 @@ setup:                                   ; DPM starting up - initialise hardware
         
         ret                                 ; Return to the DOT command memory
         
+;
+; Write the page zero jumps: JP to the BIOS warm boot at $0000, JP to the
+; BDOS at $0005, whose address at $0006 is the top of the TPA.
+;   $C3, $03, $FA,  IOBYTE, user/drive,  $C3, $00, $E0
+; Userland must be paged in at $0000. Dirties A, HL
+page_zero_jumps:
+        ld      a, $C3                  ; $C3  == JP instruction
+        ld      (REBOOT_A), a           ; BIOS jump
+        ld      ($0005), a              ; BDOS jump
+        ld      hl, BIOS.WBOOTE         ; BIOS warm boot entry point (not jump table)
+        ld      ($0001), hl             ; Undocumented instruction! Copy HL to addr.
+        ld      hl, BDOS.entry          ; BDOS entry point
+        ld      (BDOSPTR_A), hl         ; Undocumented instruction! Copy HL to addr.
+        ret
+
 ;; Shutdown kernel services, revert hardware to NextZXOS settings
 exit:                                    ; DPM exiting - safely shut down the VM changes
 .SMC_tilemap_base_adr EQU $+3:
@@ -588,52 +606,117 @@ BOOTROM:
         nextreg	MMU3_6000_NR_53, a
         ;; 4 and 5 are the kernel, we do them from the BIOS
         
-        ;; Copy the CCP into upper memory
-        ld      hl, ccp_image;              ; Copy From
-        ld      de, CCP_A;                  ; Copy To
-        ld      bc, ccpBinSz;               ; Length of Copy
-        ldir                                ; ldi repeat. Go. 
+        call    load_ccp                    ; CCP.COM from the install folder into upper memory
+        jr      c, ccp_load_error
         
         call    KERNEL_TERM.init
-        ld      a, $ff                      ; To make sure there's no pending keys
-        ld      (KERNEL.dynamic_data.console_cache), a; We write FF to the console_cache
+        xor     a                           ; To make sure there's no pending keys
+        ld      (KERNEL.dynamic_data.console_cache), a; We write 0 to the console_cache
         
         ret
         
+
+;
+; Read config.install_path + "CCP.COM" into CCP_A, up to the BDOS at BDOS_A.
+; A longer file is cut off there. Userland must be paged in.
+; Returns carry set if the file cannot be opened or read, or is empty;
+; dynamic_data.working_path holds the path. Dirties AF, BC, DE, HL
+load_ccp:
+        ld      de, config.install_path
+        ld      hl, dynamic_data.working_path
+        call    strcpy
+        ld      de, strings.ccp_name
+        call    strcpy                      ; working_path = install path + "CCP.COM"
+        ld      hl, dynamic_data.working_path
+        ld      b, esx_mode_read + esx_mode_open_exist ; Open read only, if file exists
+        ld      a, '*'                      ; This doesn't matter, pathspec overrides it
+        m_kr_esxdos F_OPEN
+        ret     c                           ; No such file, or it cannot be opened
+        push    af                          ; The handle
+        ld      hl, CCP_A                   ; Destination
+        ld      bc, BDOS_A-CCP_A            ; At most up to the BDOS
+        m_kr_esxdos F_READ                  ; BC = bytes read
+        jr      c, .close                   ; Read error, carry set
+        ld      a, b
+        or      c                           ; Clears carry
+        jr      nz, .close
+        scf                                 ; Empty file
+.close:
+        pop     bc                          ; B = the handle
+        push    af                          ; The result, in carry
+        ld      a, b
+        m_kr_esxdos F_CLOSE
+        pop     af
+        ret
+
+;
+; CCP.COM could not be loaded, at a cold or a warm boot. DP/M ends and
+; NextZXOS shows "Cannot load " and the path as the dot command's error.
+ccp_load_error:
+        call    enable_esxdos_rom           ; The dot command's RAM at $2000, for the message and exit code
+        ld      hl, @ccp_error
+        ld      de, @DotErr.CannotLoad
+        call    strcpy
+        ld      de, dynamic_data.working_path
+        call    strcpy
+        dec     hl                          ; Last character of the path
+        set     7, (hl)                     ; marks the end of the message
+        ld      hl, @ccp_error
+        jp      @kernel_error_exit
+
 ;
 ;-----------------------------------------------------------------------------
 ;-- Kernel entrypoints from BIOS
 ;-----------------------------------------------------------------------------
 BIOS_BOOT:
+        jp      KERNEL.BOOTROM
+
+;
+; Warm boot: close every open file, reload the CCP, write the page zero jumps
+; again and set the DMA address to $0080. IOBYTE ($0003) and the drive and
+; user ($0004) stay as they are; the BIOS starts the CCP on that drive and
+; user.
 BIOS_WBOOT:
-        call      KERNEL.BOOTROM
+        call    KERNEL.BOOTROM              ; Userland is paged in at $0000-$7FFF from here
+        call    KERNEL_BDOS.handle_close_all
+        call    KERNEL_BDOS.search_close
+        call    page_zero_jumps
+        ld      hl, TBUFF_A
+        ld      (BDOS.dma_address), hl
+        ret
         
 ;
 ; Returns status in A; 0 if no character is ready, 0FFh if one is.
+; A key found here is kept in console_cache until it is taken.
 BIOS_CONST:
-        call    KERNEL_KEYBOARD.read_char_a ; Read matrix, process all combos
-        cp      $FF                         ; Is it a valid key?
-        jp      z, KERNEL.ret0_in_a         ; ...$ff, invalid, return zero
-        ld      (KERNEL.dynamic_data.console_cache), a; Valid, cache key
+        ld      a, (KERNEL.dynamic_data.console_cache); Is a key already waiting?
+        or      a
+        jp      nz, KERNEL.ret255_in_a      ; ...Yes, still ready
+        call    KERNEL_KEYBOARD.read_new_key; New keypress, 0 if none
+        or      a
+        jp      z, KERNEL.ret0_in_a         ; ...None, not ready
+        ld      (KERNEL.dynamic_data.console_cache), a; Keep the key for CONIN
         jp      KERNEL.ret255_in_a
 
 ;
 ; Wait until the keyboard is ready to provide a character, and return it in A.
 BIOS_CONIN:
-        ld      a, (KERNEL.dynamic_data.console_cache); Get any pending key
-        jr      .valid_key_check            ; Check if it's a valid key first
-.read_keyboard
-        call    KERNEL_KEYBOARD.read_char_a ; Read matrix, process all combos
-.valid_key_check:
-        cp      $FF                         ; Is it a valid key?
-        jr      z, .read_keyboard           ; ...$ff, invalid, so get new key
-        ld      hl, KERNEL_KEYBOARD.prevkey ; Pointer to previous key
-        cp      (hl)                        ; Compare to current key
-        jr      z, .read_keyboard           ; ...Same, get a new key
-        ld      (KERNEL_KEYBOARD.prevkey), a; Not same, save key
-        ld      a, $ff                      ; There's no keys pending now
-        ld      (KERNEL.dynamic_data.console_cache), a; so save that state
-        ld      a, (KERNEL_KEYBOARD.prevkey); Get the saved pressed key
+        call    console_take_key            ; Waiting or new key, 0 if none
+        or      a
+        jr      z, BIOS_CONIN               ; ...None, keep waiting
+        ret
+
+;
+; Takes the next console key without waiting: the one CONST found if there is
+; one, else a new keypress. Returns the key in A, or 0 if there is none.
+console_take_key:
+        ld      a, (KERNEL.dynamic_data.console_cache); Is a key already waiting?
+        or      a
+        jp      z, KERNEL_KEYBOARD.read_new_key; ...No, scan for a new one
+        push    af
+        xor     a                           ; ...Yes, take it
+        ld      (KERNEL.dynamic_data.console_cache), a
+        pop     af
         ret
         
         
@@ -719,190 +802,273 @@ USERF_string:
 
 ; Entered with C=0. Does not return.
 BDOS_P_TERMCPM:     ; Function 0
-        ; Quit the current program, return to command prompt. 
-        ; Hardly ever used since the RST 0 instruction does same & saves 4 bytes.
-        call    KERNEL_BDOS.clear_current_fcb   ; Clear the Current_fcb
-        ld      hl, KERNEL.strings.restarting
-        call    KERNEL.kr_print_string_hl
-        jp      $0000
-        ; jp      BIOS.entry_BOOTROM
+        ; Quit the current program, return to command prompt through the
+        ; BIOS warm boot, as a jump to $0000 does.
+        jp      BIOS.entry_WBOOT
 
 ; Read a key from the keyboard, if none wait until key pressed
-; Echo it to screen, and obey things like Tab, Backspace etc
-; Entered with C=1. Returns A=character, $FF=No Char
+; Echo printable characters, CR, LF, TAB and BS to the screen, as CP/M does.
+; Entered with C=1. Returns A=character
 BDOS_C_READ:        ; Function 1
         call    BIOS_CONIN
-        cp      32                          ; Is it a control character?
-        ret     c                           ; ...Yes, just return
+        ld      b, 0
         cp      KERNEL_KEYBOARD.DEL         ; Is it the DEL character?
         ret     z                           ; ...Yes, just return
-        call    KERNEL_TERM.process             ; ...No, print character
+        cp      32                          ; Is it a printable character?
+        jr      nc, .echo                   ; ...Yes, print it
+        cp      KERNEL_KEYBOARD.CR
+        jr      z, .echo
+        cp      KERNEL_KEYBOARD.LF
+        jr      z, .echo
+        cp      KERNEL_KEYBOARD.TAB
+        jr      z, .echo
+        cp      KERNEL_KEYBOARD.BS
+        ret     nz                          ; Other control characters are not echoed
+.echo:
+        call    KERNEL_TERM.process             ; Print character
         ret
 ;
 ; Entered with C=2, E=ASCII character.
 BDOS_C_WRITE:       ; Function 2
-        push    af
         ld      a, e
-        jp      BIOS_CONOUT.print_char_a
-        
-BDOS_A_READ:; Function 3
-        ; Note that this call can hang if the auxiliary input never sends data.
-            m_kr_unimplimented BDOS_A_READ_string
-BDOS_A_READ_string:
-        DB "BDOS_C_WRITE", 0
-        jp ret255_in_a
+        call    KERNEL_TERM.process
+        jp      ret0_in_a
 
-BDOS_A_WRITE:
-            m_kr_unimplimented BDOS_A_WRITE_string
-BDOS_A_WRITE_string:
-        DB "BDOS_C_WRITE", 0
+;
+; Reader input. DP/M has no reader device: returns ^Z ($1A), the end of a
+; text file, at once.
+BDOS_A_READ:        ; Function 3
+        ld      a, $1A
+        ld      b, 0
+        ret
 
-entry_List_Output:
-        jp ret255_in_a
+;
+; Punch output. DP/M has no punch device: the character in E is discarded.
+BDOS_A_WRITE:       ; Function 4
+        jp      ret0_in_a
 
 ; Direct Console IO. E==$FF means read, else write char in E to screen
 BDOS_C_RAWIO:
         ld      a, e
         cp      $FF
         jr      nz, .write_console
-        call    KERNEL_KEYBOARD.read_char_a
-        ; ld      b, 1
+        call    console_take_key            ; Key, or 0 if none
+    IF DPM_DEBUG
         call    KERNEL_DEBUG.tm_a_loc74
-        cp      $FF
-        jr      z, .set_zero
-        or      a
-        jr      z, .set_zero
-        ret
-.set_zero:
-        xor     a
+    ENDIF
+        ld      b, 0
         ret
 .write_console
         call    KERNEL_TERM.process
         jp      ret0_in_a
         
         
-BDOS_L_WRITE:
+;
+; List output: the character in E goes to the console.
+BDOS_L_WRITE:       ; Function 5
+        ld      a, e
         jp      BDOS_C_RAWIO.write_console
 
-BDOS_IO_GET:
-            m_kr_unimplimented BDOS_IO_GET_string
-BDOS_IO_GET_string:
-        DB "BDOS_IO_GET", 0
-        jp ret0_in_a
+;
+; Returns A = IOBYTE, the byte at $0003.
+BDOS_IO_GET:        ; Function 7
+        ld      a, (IOBYTE_A)
+        ld      b, 0
+        ret
 
-BDOS_IO_SET:
-            m_kr_unimplimented BDOS_IO_SET_string
-BDOS_IO_SET_string:
-        DB "BDOS_IO_SET", 0
-        ; call show_entry_message
-        ; call CORE_message
-        ; db 'Set_IO_Byte',13,10,0
-        jp ret1_in_a
+;
+; Sets IOBYTE, the byte at $0003, to E.
+BDOS_IO_SET:        ; Function 8
+        ld      a, e
+        ld      (IOBYTE_A), a
+        jp      ret0_in_a
 
-BDOS_C_WRITESTR:     ; Print the string at "de" until we see a "$"
-        ld      a, (de)
-        inc     de
-        cp      '$'
-        jr      z, .done
-        ld      c, a
-        call    BIOS_CONOUT
-        jp      BDOS_C_WRITESTR
-.done
-        jp ret0_in_a
-
-; Read a line of input from the keyboard into a buffer pointed to by DE
-; The first two bytes of the buffer contain its max length and final length.
-; Read in keys and put them into the buffer until the max length is reached,
-; or the user presses Enter. Obey chars like Tab and Backspace.
-BDOS_C_READSTR:
-        ex      de, hl                  ; Read destination pointer now in HL
-        ld      d, (hl)                 ; d = max buffer length
-        inc     hl
-        ld      (hl), 0                 ; reset the "final length" byte.
-        ld      c, l                    ;  c == lowbyte of len
-        ld      b, h                    ;  b == hibyte of len
-        ld      e, 0
-        inc     hl
-        ex      de, hl                  ; DE points to start of buffer space
-        push    hl                      ; Fake an "ex hl, bc" so that we end 
-        push    bc                      ;  up with the HL pointing at the
-        pop     hl                      ; "final length" byte, and now BC
-        pop     bc                      ; contains the max buffer length
-.read_to_buffer:
+; Print the string at DE until we see a "$". The string may be anywhere in
+; userland, so it is copied into con_cache a piece at a time and printed from there.
+BDOS_C_WRITESTR:
+        ex      de, hl                  ; HL = userland string
+.next_piece:
         push    hl
-        push    de
-        push    bc
-        call    BDOS_C_READ             ; Get a char and echo it
-        pop     bc
-        pop     de
+        ld      de, BDOS.con_cache      ; Copy the next piece into the cache
+        ld      bc, 128
+        call    BDOS.copy_userland
         pop     hl
-        
-        cp      KERNEL_KEYBOARD.CR      ; CR==13==Done
-        jr      z, .done
-        
-        cp      KERNEL_KEYBOARD.BS      ; Ctrl-H key?
-        jr      z, .backspace
-        
-        cp      KERNEL_KEYBOARD.DEL     ; Backspace
-        jr      z, .backspace
-        
-        cp      24                      ; ctrl-x -> empty line / cancel
-        jr      z,.read_clear_line
-        
-        cp      21                      ; ctrl-u -> empty line / cancel
-        jr      z,.read_clear_line
-        
-        cp      3
-        jr      z,.read_clear_line      ; ctrl-c -> reset line
-        
-        cp      32
-        jr      c, .read_to_buffer
-        ld      (de), a                 ; Store the char in the buffer
-        inc     (hl)                    ; Increase the final-chars-count
-        inc     de                      ; Move on to next place in buffer
-        
-        djnz   .read_to_buffer          ; dec the maxchars and continue if !full
-.done:
-        ld      b, 0
-        ret
-.reboot_if_start_of_line:
-        push    af
-        ld      a,(hl)
-        cp      0
-        jr      z, .reboot
-        pop     af
-        jp      .read_clear_line
-.reboot:
-        pop     af
-        jp      $0000
-.read_clear_line:
-        ld      (hl), 0               ; zero characters entered
+        ld      de, BDOS.con_cache
+        ld      b, 128
+.next_char:
+        ld      a, (de)
+        cp      '$'
+        jp      z, ret0_in_a            ; End of string
+        call    KERNEL_TERM.process
+        inc     de
         inc     hl
-        ld      (hl), 0               ; first character is a null
+        djnz    .next_char
+        jr      .next_piece             ; HL now points at the next piece
+
+; Read a line of edited console input into the buffer at DE: +0 the maximum
+; length (mx), +1 the count read (nc), +2 on the characters. The buffer may be
+; anywhere in userland, so the line is built in con_cache and copied out when
+; it ends. Input ends on CR or LF, or when mx characters have been typed.
+;   BS, DEL     rub out the last character
+;   ^X          rub out the whole line, and start again
+;   ^U          "#", new line, start again
+;   ^R          "#", new line, type the line again
+;   ^E          new line on screen, input carries on
+;   ^C          warm boot, if it is the first character
+; ^U and ^R start the new line under the column where the line began.
+; Other control characters are ignored.
+BDOS_C_READSTR:
+        ld      (KERNEL_BDOS.readstr.dest), de
+        ex      de, hl                  ; HL = userland buffer
+        ld      de, BDOS.con_cache
+        ld      bc, 1
+        call    BDOS.copy_userland      ; Fetch mx
+        ld      a, (BDOS.con_cache)
+        ld      (KERNEL_BDOS.readstr.max), a
+        ld      a, (KERNEL_TERM.state.console_column)
+        ld      (KERNEL_BDOS.readstr.column), a ; Column where the line began
+.restart:
+        xor     a
+        ld      (BDOS.con_cache), a     ; No characters yet
+.read_to_buffer:
+        ld      a, (KERNEL_BDOS.readstr.max)
+        ld      hl, BDOS.con_cache
+        cp      (hl)                    ; Buffer full?
+        jr      z, .done                ; ...Yes, the line ends
+        call    BIOS_CONIN              ; Wait for a key
+
+        cp      KERNEL_KEYBOARD.CR      ; CR or LF ends the line
+        jr      z, .done
+        cp      KERNEL_KEYBOARD.LF
+        jr      z, .done
+        cp      KERNEL_KEYBOARD.BS
+        jr      z, .backspace
+        cp      KERNEL_KEYBOARD.DEL
+        jr      z, .backspace
+        cp      KERNEL_KEYBOARD.CTR_X
+        jr      z, .erase_line
+        cp      KERNEL_KEYBOARD.CTR_U
+        jr      z, .new_line
+        cp      KERNEL_KEYBOARD.CTR_R
+        jr      z, .retype
+        cp      KERNEL_KEYBOARD.CTR_E
+        jp      z, .physical_eol
+        cp      KERNEL_KEYBOARD.CTR_C
+        jr      z, .reboot_if_start_of_line
+        cp      32
+        jp      c, .read_to_buffer      ; Other control characters are ignored
+
+        ld      hl, BDOS.con_cache
+        inc     (hl)                    ; Increase the final-chars-count
+        ld      e, (hl)
+        ld      d, 0
+        add     hl, de                  ; HL = place for this char
+        ld      (hl), a                 ; Store the char in the buffer
+        call    KERNEL_TERM.process     ; Echo it
+        jp      .read_to_buffer
+
+.done:
+        ld      a, KERNEL_KEYBOARD.CR
+        call    KERNEL_TERM.process     ; Return the carriage, as CP/M does
+        ld      hl, BDOS.con_cache      ; Copy nc and the characters out
+        ld      c, (hl)
+        ld      b, 0
+        inc     bc
+        ld      de, (KERNEL_BDOS.readstr.dest)
+        inc     de
+        call    BDOS.copy_userland
+        ld      a, (BDOS.con_cache)
         ld      b, 0
         ret
+
+.reboot_if_start_of_line:
+        ld      a, (BDOS.con_cache)
+        or      a
+        jp      nz, .read_to_buffer     ; ^C later in a line is ignored
+        ld      a, '^'
+        call    KERNEL_TERM.process
+        ld      a, 'C'
+        call    KERNEL_TERM.process
+        jp      $0000                   ; Warm boot
+
 .backspace:
-        ld      a, (hl)                     ; If final-chars is zero we can't go back any more
-        cp      0
-        jr      z, .read_to_buffer
-        ld      a, ' '                      ; Otherwise continue...
-        dec     de
-        ld      (de), a                     ; Clear out most recent char
-        dec     (hl)                        ; Decrease final-chars-count
-        ld      a, 8
-        call    KERNEL_TERM.process             ; Print it to go back one space
+        ld      hl, BDOS.con_cache
+        ld      a, (hl)                 ; If final-chars is zero we can't go back any more
+        or      a
+        jp      z, .read_to_buffer
+        dec     (hl)                    ; Decrease final-chars-count
+        call    .rub_out
+        jp      .read_to_buffer
+
+.erase_line:
+        ld      a, (BDOS.con_cache)
+        or      a
+        jp      z, .restart
+        ld      b, a
+.erase_char:
+        call    .rub_out
+        djnz    .erase_char
+        jp      .restart
+
+.new_line:
+        call    .hash_newline
+        jp      .restart
+
+.retype:
+        call    .hash_newline
+        ld      hl, BDOS.con_cache
+        ld      a, (hl)
+        or      a
+        jp      z, .read_to_buffer
+        ld      b, a
+.retype_char:
+        inc     hl
+        ld      a, (hl)
+        call    KERNEL_TERM.process
+        djnz    .retype_char
+        jp      .read_to_buffer
+
+.physical_eol:
+        call    .crlf
+        xor     a
+        ld      (KERNEL_BDOS.readstr.column), a ; Later new lines start at the margin
+        jp      .read_to_buffer
+
+; Backspace, space, backspace: removes the last character from the screen
+.rub_out:
+        ld      a, KERNEL_KEYBOARD.BS
+        call    KERNEL_TERM.process
         ld      a, ' '
-        call    KERNEL_TERM.process             ; Cover over most recent char with space
-        ld      a, 8
-        call    KERNEL_TERM.process             ; Print it to go back one space
-        inc     b                           ; Increase max-chars-counter
-        jr      .read_to_buffer
+        call    KERNEL_TERM.process
+        ld      a, KERNEL_KEYBOARD.BS
+        jp      KERNEL_TERM.process
+
+; "#", then a new line, spaced out to the column where the line began
+.hash_newline:
+        ld      a, '#'
+        call    KERNEL_TERM.process
+        call    .crlf
+        ld      a, (KERNEL_BDOS.readstr.column)
+        or      a
+        ret     z
+        ld      b, a
+.pad:
+        ld      a, ' '
+        call    KERNEL_TERM.process
+        djnz    .pad
+        ret
+
+.crlf:
+        ld      a, KERNEL_KEYBOARD.CR
+        call    KERNEL_TERM.process
+        ld      a, KERNEL_KEYBOARD.LF
+        jp      KERNEL_TERM.process
         
 ;        
 ; Entered with C=0Bh. Returns A=L=status
 BDOS_C_STAT:
         call    BIOS_CONST
-        ld      l, a
+        ld      b, 0
         ret
 
 BDOS_S_BDOSVER:
@@ -910,23 +1076,27 @@ BDOS_S_BDOSVER:
         ld b, 0
         ret
 
+;
+; Reset the disk system: every drive read-write and logged out, then drive A
+; selected and the DMA address set to $0080.
 BDOS_DRV_ALLRESET:
-        call    KERNEL_BDOS.clear_current_fcb          ; Clear out current FCB
+        ld      hl, 0
+        ld      (KERNEL_BDOS.login_vector), hl
+        ld      (KERNEL_BDOS.ro_vector), hl
         ld      e, 0
         call    BDOS_DRV_SET                           ; Choose disk A:
 
         ld      hl, $0080
         ld      (BDOS.dma_address), hl                 ; Set standard DMA location
         
-        ret
+        jp      ret0_in_a
 
 ;
-; Change to drive letter in a, 0=A,etc.  C set on error 
+; Select the drive in E, 0=A to 15=P.
 ; Doesn't actually change set the drive letter on NextZXOS, but uses a change and back to detect it.
+; A drive that does not exist gives the Select error, which does not return.
 BDOS_DRV_SET:
-        push    de
-        call    KERNEL_BDOS.close_file              ; If we are changing disks, close any files
-        pop     de
+        call    KERNEL_BDOS.handle_close_all        ; If we are changing disks, close any files
         push    de
         ld      a, e                                ; Disk is in E, copy to A.   0 = A:, 15 = P:
 
@@ -958,188 +1128,143 @@ BDOS_DRV_SET:
         pop     de
         ld      a, e
         ld      (BDOS.current_disk), a              ; Store disk
-        
-        call    KERNEL_BDOS.clear_current_fcb       ; Clear out current FCB
+        call    KERNEL_BDOS.set_login_drive
         
         xor     a                                   ; Wipe A
         ld      b, a                                ; ...and B
         
         ret
 
+;
+; No such drive: "BDOS Error on d: Select", a key, then a warm boot, as CP/M
+; 2.2 does. $0004 is set back to the current user and disk first, so the
+; CCP does not select the missing drive again when it restarts.
 .error:
-            ; push    af : ld a, 'E' : call KERNEL_TERM.process : pop af
-
         pop     de
-        ld      hl, msg.error_on
-        call    kr_print_string_hl
+        ld      a, (BDOS.current_user)
+        add     a, a
+        add     a, a
+        add     a, a
+        add     a, a                                ; User in the high nibble...
+        ld      hl, BDOS.current_disk
+        or      (hl)                                ; ...disk in the low
+        ld      (USERDRIVE_A), a
         ld      a, e
-        add     a, 'A'
-        call    KERNEL_TERM.process
-        ld      a, ':'
-        call    KERNEL_TERM.process
-        // set carry
-        ret
+        ld      hl, msg.select
+        jp      bdos_error
 
 ;
-; Open file referenced by FCB, passed in DE - with A=0 for reset to start, A=1 to resume offset
-; The FCB that was passed in gets copied into the Current_FCB so we know which file is open.
+; Open file referenced by FCB, passed in DE. The file gets a handle in the
+; handle table. s1 becomes 0 and s2 $80: module 0, with bit 7 set (file
+; unmodified), as CP/M's open does whatever the caller left there. Sets rc
+; for the extent the FCB names (ex) from the file size; cr is left alone,
+; the caller sets it.
 ;  Return a = 0 for success, a = 255 for error.
 BDOS_F_OPEN:
         call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
-.actual:
-        xor     a                                   ; Wipe A
-.resume:
-        push    de                                  ; Preserve the incoming settings
-        push    af                                  ; DE and A are the ones that matter
-        ld      a, (KERNEL_BDOS.current_esxdos.file_handle); Get the existing cached file handle
-        cp      0                                   ; Was it Zero, aka not valid
-        jr      z, .nothing_to_close                ; ...Nope! do nothing
-        call    KERNEL_BDOS.close_file              ; ...Yep - shut it down!
-.nothing_to_close
-        pop     af
-        pop     de                                  ; Now use FCB to open the file
-        cp      0                                   ; Were we called with A==0?
-        jr      nz, .open_file                      ; ...Yes! Open the file next
-        ex      de, hl                              ; ...No! Reset offset.  So move FCB now in HL(!!)
-        ld      bc, 0                               ; Wipe the file blocks offset which will be...
-        ld      de, 0                               ; ...passed into set_block_num_in_fcb in BCDE
-        call    KERNEL_BDOS.set_block_num_in_fcb    ; Reset the file pointer params in S2, EX and CD
-        ex      de, hl                              ; FCB now back in DE, as "normal"
-.open_file:
-        push    de                                  ;
-        call    KERNEL_BDOS.copy_fcb_to_buffers     ; Parse the relevent filedir and filename out of the FCB
-        ld      a, 0                                ; Flag to denote source of filename. 0==buffer
-        call    KERNEL_BDOS.copy_buffers_to_fullpath; And join them together for an ESXDOS file call
-        
-        ld      a, '*'                              ; This doesn't matter, pathspec overrides it
-        ld      hl, KERNEL_BDOS.current_esxdos.fullpath; Full drive/path/filename combi, by copy_buffers_to_fullpath
-        ld      b, esx_mode_read + esx_mode_write + esx_mode_open_exist ; Open Read+Write, if file exists
-        m_kr_esxdos  F_OPEN
-        jr      nc, .open_file_success
-        pop     de
-        call    KERNEL_BDOS.clear_current_fcb       ; No open file, no Current FCB - wipe it
-        jp      ret255_in_a                         ; Jump to error setting return helper
-.open_file_success:
-        ld      (KERNEL_BDOS.current_esxdos.file_handle), a
-        pop     de
-        call    KERNEL_BDOS.copy_fcb_to_current_fcb ; File is now open, so copy FCB to Current FCB
-
+        xor     a
+        ld      (BDOS.fcb_cache.s1), a
+        ld      a, $80
+        ld      (BDOS.fcb_cache.s2), a
+        call    KERNEL_BDOS.handle_open_fcb         ; A = esxdos handle of the file
+        jp      c, ret255_in_a                      ; No such file
+        ld      hl, KERNEL_BDOS.current_esxdos.stats; 11byte stats buffer
+        m_kr_esxdos F_FSTAT
+        jp      c, ret255_in_a
+        call    KERNEL_BDOS.set_rc_from_size        ; Records in the extent asked for
         jp      restore_fcp_ret0_in_a
         
 ;
-; Pass in de -> FCB - return 0 for success, 255 for fail
+; Close the file the FCB names: its table handle, if it has one, is synced to
+; the card and closed. Returns 0, or 255 if the file does not exist or the
+; sync fails.
 BDOS_F_CLOSE:
-        ;; Since we backend this to a pure ESXDOS close, and then just wipe the current FCB, 
-        ;; we don't need to do anything with the FCB passed in.... this is here as a reminder
-        ;; if and when we start to support multiple open files, then we will need to use the 
-        ;; FCB passed in to find the right file to close.
-
-        ; call BDOS.cache_calling_fcb      ; cache FCB for use in kernel (mutate DE)
-        call KERNEL_BDOS.close_file
-        call KERNEL_BDOS.clear_current_fcb          ; Clear out current FCB
-        jp ret0_in_a
+        call    BDOS.cache_calling_fcb              ; Userland call, cache FCB for use in kernel
+        call    KERNEL_BDOS.handle_make_key
+        push    de
+        call    KERNEL_BDOS.handle_find             ; HL = slot, Z if the file is open
+        pop     de
+        jp      nz, .not_open
+        push    hl
+        inc     hl
+        ld      a, (hl)                             ; HANDLE.esx
+        m_kr_esxdos F_SYNC
+        pop     hl
+        push    af                                  ; Carry set if the sync failed
+        call    KERNEL_BDOS.handle_close_slot
+        pop     af
+        jp      c, ret255_in_a
+        jp      ret0_in_a
+.not_open:
+        call    KERNEL_BDOS.copy_fcb_to_buffers     ; Convert it to ESXDOS paths
+        xor     a                                   ; Flag to denote source of filename. 0==buffer
+        call    KERNEL_BDOS.copy_buffers_to_fullpath; Join ESXDOS paths together
+        ld      a, '*'                              ; Not important, filepath overrides it.
+        ld      hl, KERNEL_BDOS.current_esxdos.fullpath
+        ld      de, KERNEL_BDOS.current_esxdos.stats; 11byte stats buffer
+        m_kr_esxdos F_STAT
+        jp      c, ret255_in_a                      ; No such file
+        jp      ret0_in_a
 
 ;
-; Input is DE -> FCB with drive & filename/wildcards
-; Returns A=$FF if nothing or A=0, and directory entry in DMA location.
-; The drive can be 0 to 15 for A to P, or '?' to mean current drive, leaves disk
-; so that "search_for_next" get the next entry.
+; Search for the first file that matches the FCB at DE: drive (0 the current
+; disk; "?" the current disk and every user number), name with "?" for any
+; character, and ex ("?" for every extent). The directory entry goes to the
+; DMA address, as entry 0 of a 128 byte directory record; see
+; KERNEL_BDOS.search_first for how entries are made from FAT files.
+; Returns A=0, or A=255 if no file matches.
 BDOS_F_SFIRST:
         call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
-.actual:
-        ld      a, 0
-        ld      (file_counter), a
-        ld      a, (KERNEL_BDOS.current_esxdos.dir_handle)
-        push    de
-        m_kr_esxdos F_CLOSE
-        pop     de
-        
-        call    KERNEL_BDOS.copy_fcb_to_buffers
-        
-        ld      a, '*'                  ; Not super important, spec filedir overrides this
-        ld      b, esx_mode_short_only + esx_mode_use_wildcards + esx_mode_sf_enable
-        ld      c, esx_sf_exclude_dirs + esx_sf_exclude_dots
-        
-        ld      hl, KERNEL_BDOS.current_esxdos.filepath
-            ; push af : push bc : push de : push hl : call KERNEL.kr_print_string_hl : pop hl : pop de : pop bc : pop af
-        ld      de, KERNEL_BDOS.current_esxdos.filename
-            ; push af : push bc : push de : push hl : push hl : pop de : call KERNEL.kr_print_string_hl : pop hl : pop de : pop bc : pop af
-            
-        m_kr_esxdos F_OPENDIR
-        jr      c, .error
-        
-        ld      (KERNEL_BDOS.current_esxdos.dir_handle), a; Save the opened directory handle
-        ; ld      hl, KERNEL_BDOS.current_esxdos.dir_depth; Pointer to word containing how many files down we are
-        ; ld      (hl), 0                 ; Set to zero, as new directory
-        
-        jr      BDOS_F_SNEXT
-        
-.error
-        ;; Do proper error stuffs here
-        m_kr_fatal BDOS_F_SFIRST_error
-BDOS_F_SFIRST_error:
-        DB "Failed to open drive", 0
+        call    KERNEL_BDOS.search_first
+        jr      BDOS_F_SNEXT.result
 
-file_counter:
-        db      0
-        
+;
+; Search for the next directory entry that matches the FCB search first was
+; given. Files opened or written between the calls do not change the search.
+; Returns A=0 with the entry at the DMA address, or A=255 when there are no
+; more.
 BDOS_F_SNEXT:
-        ld      a, (KERNEL_BDOS.current_esxdos.dir_handle)
-        
-        ; ld      b, esx_mode_short_only + esx_mode_use_wildcards
-        ; ld      c, esx_sf_exclude_dirs + esx_sf_exclude_dots
-        ld      hl, KERNEL_BDOS.current_esxdos.entry; buffer to write result into
-        ld      de, KERNEL_BDOS.current_esxdos.filename; Wildcard string to match files against
-        m_kr_esxdos F_READDIR
-        cp      0
-        jr      z, .not_found
-        
-        ld      a, (file_counter)
-        inc     a
-        ld      (file_counter), a
-; .found:
-        ld      hl, KERNEL_BDOS.current_esxdos.entry; the first time around the copyloop skips a byte
-        ld      de, BDOS.dma_cache                  ; Both of these are one too low, so that
-        call    KERNEL_BDOS.esxdos_to_FCB
+        call    KERNEL_BDOS.search_next
+.result:
+        or      a
+        jp      nz, ret255_in_a                     ; Found nothing
         call    BDOS.copy_dma_out_kernel
         jp      ret0_in_a                           ; Something Found!
-.not_found:
-        ld      a, (KERNEL_BDOS.current_esxdos.dir_handle)               ; (not sure if I should be doing this here)
-        m_kr_esxdos F_CLOSE                         ; But since we exhausted the dir-search, close dir.
-        jp      ret255_in_a                         ; Found nothing
+
 ;
-; Delete file in DE's FCB. Return's 0 for success, 255 otherwise
-;     Uses a lot of the same routines as DIR under the hood, to find files to delete.
+; Delete the files that match DE's FCB (name with "?" for any character; ex
+; plays no part). The DMA is left alone. A read-only drive, or a matching
+; file that is read-only, gives the R/O error, which does not return.
+; Returns 0 for success, 255 if no file matches.
 BDOS_F_DELETE:
         call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
+        call    KERNEL_BDOS.check_drive_writable
         ld      a, 255                              
         ld      (KERNEL_BDOS.current_esxdos.delete_flag), a; Store the result
         
         ld      a, (de)                             ; Put Drive Name into A
         ld      (KERNEL.dynamic_data.store_source), a; And then write it to somewhere safe
 
-        push    de
-        call    KERNEL_BDOS.clear_current_fcb            ; Clear out current FCB
-        pop     de
-
 .loop:
-        push    de                                  ; Put FCB pointer back on stack
-
-        ld      a, (BDOS.current_user)
-        call    BDOS_F_SFIRST.actual
-        
+        ld      a, '?'
+        ld      (BDOS.fcb_cache.ex), a              ; One entry for each file
+        call    KERNEL_BDOS.search_first            ; The entry in dma_cache, the file in current_esxdos.entry
         push    af
-        ld      a, (KERNEL_BDOS.current_esxdos.dir_handle); (not sure if I should be doing this here)
-        m_kr_esxdos F_CLOSE                         ; Close directory, start from scratch if required.
+        call    KERNEL_BDOS.search_close            ; Start from scratch each time
         pop     af
-        
         cp      255
         jr      z, .done
+        ld      a, (KERNEL_BDOS.current_esxdos.entry); FAT attributes
+        and     fat_attr_readonly
+        jr      nz, .read_only
 
         xor     a
         ld      (KERNEL_BDOS.current_esxdos.delete_flag), a; Store a success reult
 
-        ld      de, BDOS.dma_cache                  ; SFIRST leaves a copy of the FCB in the dma_cache
+        ld      a, (KERNEL.dynamic_data.store_source)
+        ld      (BDOS.dma_cache), a                 ; The entry, as an FCB on the drive asked for
+        ld      de, BDOS.dma_cache
+        call    KERNEL_BDOS.handle_close_fcb        ; A file still open is closed before it is deleted
         call    KERNEL_BDOS.copy_fcb_to_buffers     ; Convert it to ESXDOS paths
         ld      a, 0                                ; Flag to denote source of filename. 0==buffer
         call    KERNEL_BDOS.copy_buffers_to_fullpath; Join ESXDOS paths together
@@ -1148,293 +1273,178 @@ BDOS_F_DELETE:
         ld      hl, KERNEL_BDOS.current_esxdos.fullpath; Full path to file to delete
         m_kr_esxdos F_UNLINK
         jr      c, .error
-        pop     de                                  ; Get original FCB back
         jr      .loop
 .done:
-        pop     de
         ld      a, (KERNEL_BDOS.current_esxdos.delete_flag)
         ld      b, 0
         ret
 .error:
-        pop     de
         jp      ret255_in_a
+.read_only:
+        call    KERNEL_BDOS.fcb_drive
+        jp      error_ro_file
 ;
-; Read 128bytes from a FCB to DMA address, Returns a non-zero value on error.
-;     When <128 bytes, remainder is padded with NULLs, updates Current_FCB
-;     pointer values with every read.
+; Read the 128 byte record the FCB's position names to the DMA address and
+; advance the position. The file's handle comes from the handle table; the
+; position comes from the FCB every time. A short last record is padded with
+; ^Z. Returns 0, or 1 with the DMA untouched when there is no record there.
 BDOS_F_READ:
         call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel (mutate DE)
-        push    de                                  ; Keep the DE
-                        ; call KERNEL_DEBUG.print_crlf
-                        ; ld hl, KERNEL_DEBUG.read__string : call KERNEL.kr_print_string_hl
-                        ; inc     de : push de : pop hl : call KERNEL.kr_print_string_hl : call KERNEL_DEBUG.print_crlf
-        pop de: push de
-                        ; ld      a, '[' : call KERNEL_TERM.process
-        call    KERNEL_BDOS.match_current_fcb       ; Is this the same as we already have open?
-        jr      z, .file_match                      ; ...Yes (read attempt follows matching open)
-                        ; ld      a, '!' : call KERNEL_TERM.process
-        call    KERNEL_BDOS.close_file              ; ...No. Close existing file.
-        ld      a, 1                                ; Open new file but don't update file pointer
-        call    KERNEL.BDOS_F_OPEN.resume           ; Open using existing file pointer in A
-        pop     de
-        push    de
-.file_match:
-    ; Now jump to the right place in the file
-        call    KERNEL_BDOS.get_block_num_from_fcb; Calculate file blocks in BCDE
-            ld      a, b : call KERNEL_DEBUG.tm_a_loc18
-            ld      a, c : call KERNEL_DEBUG.tm_a_loc20
-            ld      a, d : call KERNEL_DEBUG.tm_a_loc22
-            ld      a, e : call KERNEL_DEBUG.tm_a_loc24
-        call    KERNEL_MATHS.mul_bcde_by_128; BCDE now byte offset into file
-        push    de                          ; calculate the offset didn't exceed length
-        push    bc                          ; We need to preserve the offset, so that we can...
-            ld      a, b : call KERNEL_DEBUG.tm_a_loc28
-            ld      a, c : call KERNEL_DEBUG.tm_a_loc30
-            ld      a, d : call KERNEL_DEBUG.tm_a_loc32
-            ld      a, e : call KERNEL_DEBUG.tm_a_loc34
-        ld      a, (KERNEL_BDOS.current_esxdos.file_handle); Get the file handle of the open file
-        ld      l, esx_seek_set             ; Tell seek to use absolute positioning.
-        m_kr_esxdos F_SEEK                          ; Seek to our byte offset, still in BCDE
-            ld      a, b : call KERNEL_DEBUG.tm_a_loc38
-            ld      a, c : call KERNEL_DEBUG.tm_a_loc40
-            ld      a, d : call KERNEL_DEBUG.tm_a_loc42
-            ld      a, e : call KERNEL_DEBUG.tm_a_loc44
-
-        pop     hl
-        ld      a, b
-        cp      h
-        jr      nz, .seek_fail              ; Not requested seek value, bail after balancing stack
-        ld      a, c
-        cp      l
-        jr      nz, .seek_fail              ; Not requested seek value, bail after balancing stack
-        pop     hl
-        ld      a, d
-        cp      h
-        jr      nz, .read_fail              ; Not requested seek value, bail
-        ld      a, e
-        cp      l
-        jr      nz, .read_fail              ; Not requested seek value, bail
-        call    KERNEL_BDOS.read_128_bytes_to_dma
-        jr      nz, .read_fail                      ; Read failed!
-        pop     de                                  ; Get original FCB back again
-        push    de                                  ; But still keep it safe for later
-        call    KERNEL_BDOS.get_block_num_from_fcb  ; And get the block pointer again
-        call    KERNEL_MATHS.inc_bcde               ; Increment 32bit BCDE by 1
-        pop     hl                                  ; Restore FCB into HL
-            ld      a, b : call KERNEL_DEBUG.tm_a_loc48
-            ld      a, c : call KERNEL_DEBUG.tm_a_loc50
-            ld      a, d : call KERNEL_DEBUG.tm_a_loc52
-            ld      a, e : call KERNEL_DEBUG.tm_a_loc54
-        call    KERNEL_BDOS.set_block_num_in_fcb    ; Store BCDE blocknum in FCB
-        ex      de, hl                              ; FCB back in DE now
-        call    KERNEL_BDOS.copy_fcb_to_current_fcb ; Make a note of the state of the currently open file
-        
-        jp restore_fcp_ret0_in_a                      ; Success
-.seek_fail:
-        pop     de                                  ; Balance remainder of pushed BC/DE
+        call    KERNEL_BDOS.read_record
+        or      a
+        jr      nz, .read_fail
+        call    advance_position
+        jp      restore_fcp_ret0_in_a               ; Success
 .read_fail:
-        pop     de                                  ; Restore DE from stack
-        ld a, 1                                     ; 1 = seek to unwritten extent
-        ld b, 0
+        ld      a, 1                                ; 1 = no data at the record
+        ld      b, 0
         ret
 
+;
+; Move the cached FCB's position on one record.
+advance_position:
+        ld      de, BDOS.fcb_cache
+        call    KERNEL_BDOS.get_block_num_from_fcb  ; BCDE = record number
+        call    KERNEL_MATHS.inc_bcde               ; Next record
+        ld      hl, BDOS.fcb_cache
+        jp      KERNEL_BDOS.set_block_num_in_fcb
+
+;
+; Write the 128 byte record at the DMA address to the file at the position the
+; FCB names, and advance the position. The file's handle comes from the
+; handle table, the one F_READ uses, so one FCB can read and write a file. A
+; position past the end of the file first extends it with zeroes. rc becomes
+; the number of records the file has in the extent the FCB names after the
+; write, and s2's bit 7 (file unmodified) is cleared. A read-only drive or
+; file gives the R/O error, which does not return.
+; Returns 0, 2 when the disk is full or the write fails, or 255 when the file
+; does not exist.
 BDOS_F_WRITE:
-    ; Pass in de -> FCB
-    ; Return a = 0 on success, or a = 255 on error
-    ; We need to write 128 bytes from the current DMA address to the
-    ; current position of the file referenced in FCB.
-    ; Start by checking that the FCB equals the Current FCB.
-    ; If not, close the current file and open the new one, jumping to the right place.
-    ; If so just proceed.
-    ; Then increase the pointer in the FCB and copy it to Current_FCB.
+        call    BDOS.cache_calling_fcb              ; Userland call, cache FCB for use in kernel
+        call    KERNEL_BDOS.write_record
+        or      a
+        jr      nz, write_fail
+        call    advance_position
+        ; Fall through to finish the write
 
-;    push de
-;    call disk_activity_start
-dont_turn_on:
-;    call match_current_fcb
-;    jr z, entry_Write_Sequential1
-;    ; Need to close existing file and open the new one.
-;    ld a, 1                                     ; Open new file but don't update file pointer
-;    call BDOS_F_OPEN.actual
-;    pop de
-;    push de
-    ; Now jump to the right place in the file
-;    call get_block_num_from_fcb              ; bcde = file pointer
-;    call multiply_bcde_by_128                   ; bcde = byte location in file
-;    call CORE_move_to_file_pointer              ; move to that location
-;    cp USB_INT_SUCCESS
-;    jr nz, entry_Write_Sequential_fail
-entry_Write_Sequential1:
-;    ld de, (dma_address)
-;    call CORE_write_to_file
-;    call CORE_disk_off
-;    pop de                                      ; Get the FCB location back
-;    push de
-;    call get_block_num_from_fcb              ; bcde = file pointer
-;    call KERNEL_MATHS.inc_bcde
-;    pop hl
-;    call set_file_pointer_in_fcb
-;    ex de, hl
-;    call copy_fcb_to_current_fcb                ; Make a note of the state of the currently open file
-        jp ret0_in_a
+;
+; After a write: clear s2's bit 7 (file unmodified), set rc for the extent
+; the FCB names from the file's size, and copy the FCB back to the caller.
+write_done:
+        ld      hl, BDOS.fcb_cache.s2
+        res     7, (hl)                             ; The file is modified
+        ld      a, (KERNEL_BDOS.io_handle)
+        ld      hl, KERNEL_BDOS.current_esxdos.stats; 11byte stats buffer
+        m_kr_esxdos F_FSTAT
+        ld      a, 2
+        jr      c, write_fail
+        call    KERNEL_BDOS.set_rc_from_size        ; Records in the extent the FCB now names
+        jp      restore_fcp_ret0_in_a
+write_fail:
+        ld      b, 0                                ; A = the error
+        ret
 
-entry_Write_Sequential_fail:
-;    pop de
-;    call CORE_message
-;    db 'BDOS write error!',13,10,0
-;    call CORE_disk_off
-;    jr ret255_in_a
-
+;
+; Create the file the FCB names and leave it open in the handle table. The
+; file must not exist: the CP/M 2.2 manual leaves duplicates to the program,
+; which deletes the file first, so an existing file is left as it is and the
+; call fails. ex, s1, s2, rc, the allocation map d0-d15 and cr are zeroed.
+; A read-only drive gives the R/O error, which does not return.
+; Returns 0, or 255 if the file exists or cannot be created.
 BDOS_F_MAKE:
-    ; Make File passes in DE->FCB
-    ; Returns a = 0 for success and a = 255 for failure
-;    push de
-;
-;    call KERNEL_BDOS.close_file                                 ; just in case another file is open
-;
-;    pop de
-;    push de
-;    call copy_fcb_to_filename_buffer
-;
-;    call CORE_disk_on
-;    call CORE_connect_to_disk
-;    call CORE_mount_disk
-;
-;    call open_cpm_disk_directory
-;
-;    ld de, filename_buffer+2            ; Specify filename
-;    call CORE_create_file
-;
-;    jr z, make_file_success
-;
-;    call CORE_disk_off
-;    pop de
-;    call clear_current_fcb                          ; Clear out current FCB because of fail.
-;    jr ret255_in_a                              ; error
-make_file_success:
-;    call CORE_disk_off
-;    pop de
-;    call copy_fcb_to_current_fcb                    ; This is now the currently open file
-        jp ret0_in_a
+        call    BDOS.cache_calling_fcb              ; Userland call, cache FCB for use in kernel
+        call    KERNEL_BDOS.check_drive_writable
+        call    KERNEL_BDOS.handle_create_fcb
+        jp      c, ret255_in_a                      ; Exists, or cannot be created
+        ld      hl, BDOS.fcb_cache.ex
+        ld      b, BDOS.fcb_cache.extra_bytes - BDOS.fcb_cache.ex ; ex through cr
+.zero:
+        ld      (hl), 0
+        inc     hl
+        djnz    .zero
+        jp      restore_fcp_ret0_in_a
 
 BDOS_F_RENAME:
-        call    BDOS.cache_calling_fcb ; Userland call, cache FCB for use in kernel
     ; DE points to a FCB with the
     ; SOURCE filename at FCB+0 and
     ; TARGET filename at FCB+16.
-    ; The disk drive must be the same in both names, or else error.
-    ; Check if the target file already exists. If so return with error.
+    ; The source's drive byte selects the drive; the target's drive byte is
+    ; ignored, and taken as the source's (CP/M 2.2 manual p. 5-25).
+    ; The target must not exist, and the source must.
+    ; A read-only drive or source file gives the R/O error, which does not
+    ; return.
     ; Success a = 0
     ; Error a = 255
+        call    BDOS.cache_calling_fcb              ; Userland call, cache FCB for use in kernel
+        call    KERNEL_BDOS.check_drive_writable
+        ld      hl, BDOS.fcb_cache+1                ; Source name
+        call    .mask_name
+        ld      hl, BDOS.fcb_cache+17               ; Target name
+        call    .mask_name
+        ld      a, (de)                             ; Source drive, 0 = current disk
+        or      a
+        jr      nz, .source_drive
+        ld      a, (BDOS.current_disk)              ; Current disk is indexed from 0...
+        inc     a                                   ; ...so adjust it to match the FCB
+        ld      (de), a
+.source_drive:
+        ld      (BDOS.fcb_cache+16), a              ; The target is on the source's drive
+        call    KERNEL_BDOS.handle_close_fcb        ; Close the source, if it is open
+        ld      de, BDOS.fcb_cache+16
+        call    KERNEL_BDOS.handle_close_fcb        ; Close the target, if it is open
 
-        ld dynamic_data.store_source, de        ; Store source FCB pointer for now
-        push de
-        call KERNEL_BDOS.close_file             ; just in case there is an open one.
-        pop de
+        call    KERNEL_BDOS.copy_fcb_to_buffers     ; Convert the target to ESXDOS paths
+        xor     a                                   ; Flag to denote source of filename. 0==buffer
+        call    KERNEL_BDOS.copy_buffers_to_fullpath; Join ESXDOS paths together
+        ld      a, '*'                              ; Not important, filepath overrides it.
+        ld      hl, KERNEL_BDOS.current_esxdos.fullpath; Full path of the target
+        ld      de, KERNEL_BDOS.current_esxdos.stats; 11byte stats buffer
+        m_kr_esxdos F_STAT
+        jp      nc, ret255_in_a                     ; Target already exists
+        ld      de, KERNEL_BDOS.current_esxdos.fullpath
+        ld      hl, KERNEL.dynamic_data.working_path
+        call    KERNEL.strcpy                       ; Keep the target path, fullpath is needed for the source
 
-        ld hl, 16
-        add hl, de
-        ld (BDOS.store_target), hl              ; And store the target FCB for now
-        ex de, hl                               ; target is now in de
+        ld      de, BDOS.fcb_cache
+        call    KERNEL_BDOS.copy_fcb_to_buffers     ; Convert the source to ESXDOS paths
+        xor     a                                   ; Flag to denote source of filename. 0==buffer
+        call    KERNEL_BDOS.copy_buffers_to_fullpath; Join ESXDOS paths together
+        ld      a, '*'                              ; Not important, filepath overrides it.
+        ld      hl, KERNEL_BDOS.current_esxdos.fullpath; Full path of the source
+        ld      de, KERNEL_BDOS.current_esxdos.stats; 11byte stats buffer
+        m_kr_esxdos F_STAT
+        jp      c, ret255_in_a                      ; No source
+        ld      a, (KERNEL_BDOS.current_esxdos.stats+2); FAT attributes
+        and     fat_attr_readonly
+        jr      z, .rename
+        call    KERNEL_BDOS.fcb_drive
+        jp      error_ro_file
+.rename:
+        ld      a, '*'                              ; Not important, filepaths override it.
+        ld      hl, KERNEL_BDOS.current_esxdos.fullpath; Full path of the source
+        ld      de, KERNEL.dynamic_data.working_path; Full path of the target
+        m_kr_esxdos F_RENAME
+        jp      c, ret255_in_a                      ; No source, or it could not be renamed
+        jp      ret0_in_a
+;
+; Clear the attribute bit (bit 7) of the 8+3 name at HL. Dirties AF, B, HL
+.mask_name:
+        ld      b, 11
+.mask_char:
+        ld      a, (hl)
+        and     %01111111
+        ld      (hl), a
+        inc     hl
+        djnz    .mask_char
+        ret
 
-
-    ; Check if target drive is "default", if so, copy from source.
-    ;  - this is "implied same", so rename permitted.
-        ld hl, (BDOS.store_target)              ; retrieve pointer to target file
-        ld a, (hl)                              ; Target file drive letter
-        cp 0                                    ; Is target 0, aka default drive?
-        jr nz, entry_Rename_target_not_default  ; Yes, so same as source
-        ld de, (KERNEL.dynamic_data.store_source); DE points to source FCB again
-        ld a, (de)                              ; A = source drive letter
-        ld (hl), a                              ; Copy drive from source to target
-
-
-// just use ESXDOS direct for these internal file ops.
-// THE NEW WAY, COPIED FROM THE EXISTING OPEN ROUTINE
-        push    de                                          ; Stash FCB
-        call    KERNEL_BDOS.copy_fcb_to_buffers             ;  Copy drivepath and drive name out of FCB
-        call    KERNEL_BDOS.copy_buffers_to_fullpath        ; Create an ESXDOS access path
-
-        // DRS - check the drivespec stuff - is this next comment true?
-
-        ld      a, '*'                                      ; Not important, filepath overrides it.
-        ld      hl, KERNEL_BDOS.current_esxdos.fullpath     ; Full path of file to get stats
-        m_kr_esxdos F_OPEN
-        jr      c, .not_exist
-        push    af                                          ; Preserve file-handle
-        ld      hl, KERNEL_BDOS.current_esxdos.stats        ; 11byte stats buffer
-        m_kr_esxdos F_FSTAT
-        pop     af                                          ; Restore file-handle
-        push    bc
-        push    de
-        m_kr_esxdos F_CLOSE
-        pop     de
-        pop     bc
-// END OF THE NEW WAY
-
-        // STILL OLD CODE
-;    call open_cpm_disk_directory
-;    ld hl, filename_buffer+2                        ; Specify filename
-;    call CORE_open_file
-;    jr z, entry_Rename_File_exists
-
-entry_Rename_File_same_drives:
-    ; Open the source file.
-;    call KERNEL_BDOS.close_file
-;    ld de, (store_source)
-;    call copy_fcb_to_filename_buffer
-;    call open_cpm_disk_directory
-;    ld hl, filename_buffer+2                        ; Specify source filename
-;    call CORE_open_file
-;    jp nz, entry_Rename_File_no_source
-
-    ; Read in the P_FAT_DIR_INFO
-;    call CORE_dir_info_read
-;    jr nz, entry_Rename_File_no_source
-
-    ; Update the name of the target file by copying the name from target to source
-;    ld hl, (store_target)
-;    inc hl
-;    ld de, disk_buffer
-;    ld bc, 11
-;    ldir
-
-    ; Write it back again.
-;    call CORE_dir_info_write
-
-    ; Close the file.
-;    call KERNEL_BDOS.close_file
-
-            m_kr_unimplimented BDOS_F_RENAME_string
-BDOS_F_RENAME_string:
-        DB "BDOS_F_RENAME", 0
-
-;    call clear_current_fcb                          ; Clear out current FCB
-        jp ret0_in_a                                ; success
-entry_Rename_File_exists:
-    ;call CORE_message
-    ;db '[EXISTS]',13,10,0
-        jp ret255_in_a
-entry_Rename_File_different_drives:
-    ;call CORE_message
-    ;db '[DIFF]',13,10,0
-        jp ret255_in_a
-
-entry_Rename_File_no_source:
-    ;call CORE_message
-    ;db '[NONE]',13,10,0
-        jp ret255_in_a
-
-BDOS_DRV_LOGINVEC:
-        m_kr_unimplimented BDOS_DRV_LOGINVEC_string
-BDOS_DRV_LOGINVEC_string:
-        DB "BDOS_DRV_LOGINVEC", 0
-    ;call show_entry_message
-	;call CORE_message
-	;db 'Ret_Log_Vec',13,10,0
-        ld hl, $FFFF ; All drives are always logged in
-        ld a, l
-        ld b, h
+;
+; Returns HL = the login vector: bit 0 for drive A to bit 15 for drive P, set
+; for each drive selected, or named in an FCB, since the last reset.
+BDOS_DRV_LOGINVEC:                                                              ;EQU 24       $18
+        ld      hl, (KERNEL_BDOS.login_vector)
+        ld      a, l
+        ld      b, h
         ret
 
 ; Get the currently selected drive number, return it in A, reset B to zero at same time
@@ -1450,41 +1460,96 @@ BDOS_F_DMAOFF:                                                                  
         ld (BDOS.dma_address), de
         jp ret0_in_a
 
-BDOS_DRV_ALLOCVEC:
-        ld hl, BDOS.diskalloc
-        ld a, l
-        ld b, h
+;
+; Returns HL = the allocation vector, the same for every drive: one bit per
+; block of the DPB (function 31), with only the directory blocks in use. It
+; does not describe the FAT card.
+BDOS_DRV_ALLOCVEC:                                                              ;EQU 27       $1B
+        ld      hl, BDOS.diskalloc
+        ld      a, l
+        ld      b, h
         ret
 
-BDOS_DRV_SETRO:
-        m_kr_unimplimented BDOS_DRV_SETRO_string
-BDOS_DRV_SETRO_string:
-        DB "BDOS_DRV_SETRO", 0
-        jp ret1_in_a
+;
+; Set the current drive read-only until the next disk reset (function 13,
+; which the CCP runs at every warm boot). Writes to it then give the R/O
+; error.
+BDOS_DRV_SETRO:                                                                 ;EQU 28       $1C
+        ld      a, (BDOS.current_disk)
+        call    KERNEL_BDOS.drive_bit
+        ld      de, (KERNEL_BDOS.ro_vector)
+        ld      a, l
+        or      e
+        ld      l, a
+        ld      a, h
+        or      d
+        ld      h, a
+        ld      (KERNEL_BDOS.ro_vector), hl
+        jp      ret0_in_a
 
-BDOS_DRV_ROVEC:
-        m_kr_unimplimented BDOS_DRV_ROVEC_string
-BDOS_DRV_ROVEC_string:
-        DB "BDOS_DRV_ROVEC", 0
-    ;call show_entry_message
-    ;call CORE_message
-    ;db 'Get_RO_Vect',13,10,0
-        jp ret1_in_a
+;
+; Returns HL = the read-only vector, bit 0 for drive A to bit 15 for drive P.
+BDOS_DRV_ROVEC:                                                                 ;EQU 29       $1D
+        ld      hl, (KERNEL_BDOS.ro_vector)
+        ld      a, l
+        ld      b, h
+        ret
 
-BDOS_F_ATTRIB:
-        m_kr_unimplimented BDOS_F_ATTRIB_string
-BDOS_F_ATTRIB_string:
-        DB "BDOS_F_ATTRIB", 0
-        jp ret1_in_a
+;
+; Set the attributes of the file the FCB at DE names from the attribute bits
+; of its name: t1' read-only, as the FAT read-only attribute; t2' system, as
+; the FAT system and hidden attributes. f1'-f4' are not kept. A read-only
+; drive gives the R/O error, which does not return.
+; Returns 0, or 255 if there is no such file.
+BDOS_F_ATTRIB:                                                                  ;EQU 30       $1E
+        call    BDOS.cache_calling_fcb
+        call    KERNEL_BDOS.check_drive_writable
+        call    KERNEL_BDOS.handle_close_fcb        ; It opens again in the mode the new attributes allow
+        call    KERNEL_BDOS.copy_fcb_to_buffers
+        xor     a                                   ; Flag to denote source of filename. 0==buffer
+        call    KERNEL_BDOS.copy_buffers_to_fullpath
+        ld      b, esx_attr_write
+        ld      a, (BDOS.fcb_cache+9)               ; t1
+        and     %10000000
+        jr      z, .writable
+        ld      b, 0                                ; Read-only
+.writable:
+        ld      a, (BDOS.fcb_cache+10)              ; t2
+        and     %10000000
+        jr      z, .not_hidden
+        ld      a, b
+        or      esx_attr_hidden
+        ld      b, a
+.not_hidden:
+        ld      c, esx_attr_write + esx_attr_hidden ; The attributes to change
+        call    .chmod
+        jp      c, ret255_in_a                      ; No such file
+        ld      b, 0
+        ld      a, (BDOS.fcb_cache+10)              ; t2
+        and     %10000000
+        jr      z, .not_system
+        ld      b, esx_attr_system
+.not_system:
+        ld      c, esx_attr_system                  ; The attribute to change
+        call    .chmod
+        jp      c, ret255_in_a
+        jp      ret0_in_a
+;
+; esxdos F_CHMOD on the file at fullpath: B = values, C = the attributes to
+; change. A change of both hidden and system in one call sets the wrong
+; attributes, so they are changed in separate calls.
+.chmod:
+        ld      a, '*'                              ; Not important, filepath overrides it.
+        ld      hl, KERNEL_BDOS.current_esxdos.fullpath
+        m_kr_esxdos F_CHMOD
+        ret
 
-BDOS_DRV_DPB:
-        m_kr_unimplimented BDOS_DRV_DPB_string
-BDOS_DRV_DPB_string:
-        DB "BDOS_DRV_DPB", 0
-    ; Returns address in HL
-;    ld hl, dpblk
-;    ld a, l
-;    ld b, h
+;
+; Returns HL = the disk parameter block, the same for every drive.
+BDOS_DRV_DPB:                                                                   ;EQU 31       $1F
+        ld      hl, BDOS.dpblk
+        ld      a, l
+        ld      b, h
         ret
 
 BDOS_F_USERNUM:                   ;EQU 32       $20
@@ -1507,180 +1572,204 @@ BDOS_F_USERNUM:                   ;EQU 32       $20
         ld b, 0
         ret
         
-BDOS_F_READRAND:
-        m_kr_unimplimented BDOS_F_READRAND_string
-BDOS_F_READRAND_string:
-        DB "BDOS_F_READRAND", 0
-;    push de                                         ; store FCB for now
-;    call disk_activity_start
-;    call get_random_pointer_from_fcb                ; random is in hl
-;    call convert_random_pointer_to_normal_pointer   ; Normal pointer is in bcde
-;    pop hl                                          ; hl -> fcb
-;    push hl
-;    call set_file_pointer_in_fcb                    ; FCB is now up-to-date
-
-;    pop de                                          ; de -> FCB
-;    push de
-    ; Need to close any existing open file and open the new one.
-;    ld a, 1                                         ; Open new file but don't update file pointer
-;    call BDOS_F_OPEN.actual
-;    pop de
-    ; Now jump to the right place in the file
-;    call get_block_num_from_fcb                  ; bcde = file pointer
-;    call multiply_bcde_by_128                       ; bcde = byte location in file
-;    call CORE_move_to_file_pointer                  ; move to that location
-;    ld de, (dma_address)
-;    call CORE_read_from_file
-;    jr nz, entry_Read_Random2                        ; If fail to read, return error code
-;    call KERNEL_BDOS.close_file
-;    call clear_current_fcb
-;    call CORE_disk_off
-        jp ret0_in_a                                ; success
-entry_Read_Random2:
-;    call KERNEL_BDOS.close_file
-;    call clear_current_fcb
-;    ld a, 4                                         ; "Seek to unwritten extent" error if we try to read
-;    ld b, 0                                         ; past the end of the file.
-        ret
-
-BDOS_F_WRITERAND:
-        m_kr_unimplimented BDOS_F_WRITERAND_string
-BDOS_F_WRITERAND_string:
-        DB "BDOS_F_WRITERAND", 0
-;    push de                                         ; store FCB for now
-;    call disk_activity_start
-;    call get_random_pointer_from_fcb                ; random is in hl
-;    call convert_random_pointer_to_normal_pointer   ; Normal pointer is in bcde
-;    pop hl                                          ; hl -> fcb
-;    push hl
-;    call set_file_pointer_in_fcb                    ; FCB is now up-to-date
-
-;    pop de                                          ; de -> FCB
-;    push de
-    ; Need to close any existing open file and open the new one.
-;    ld a, 1                                     ; Open new file but don't update file pointer
-;    call BDOS_F_OPEN.actual
-;    pop de
-    ; Now jump to the right place in the file
-;    call get_block_num_from_fcb              ; bcde = file pointer
-;    call multiply_bcde_by_128                   ; bcde = byte location in file
-;    call CORE_move_to_file_pointer                   ; move to that location
-;    cp USB_INT_SUCCESS
-;    jr nz, entry_Write_Random_fail
-
-;    ld de, (dma_address)
-;    call CORE_write_to_file
-;    call KERNEL_BDOS.close_file                             ; Need to close the file to flush the data out to disk
-;    call clear_current_fcb
-
-;    call CORE_disk_off
-        jp ret0_in_a                                ; success
-
-entry_Write_Random_fail:
-        ; call KERNEL_BDOS.close_file                             ; Need to close the file to flush the data out to disk
-        ; call clear_current_fcb
-        ; call CORE_disk_off
-        ; ld a, 1                                         ; Return error code TODO: 255???
-        ; ld b, 0
-        ret
-
-convert_random_pointer_to_normal_pointer:
-    ; Pass in random pointer in hl
-    ; Returns normal pointer in bcde
-        ; ex de, hl
-        ; ld bc, 0
-        ret
-
-; Set the random record count bytes of n FCB, pointed at by DE, to number of 128b records in file.
-; Returns A=0 if successful, or 255 if an error occured.
-BDOS_F_SIZE:
-        push    de                                          ; Stash FCB
-        call    KERNEL_BDOS.close_file                      ; just in case there is an open one.
-        call    KERNEL_BDOS.copy_fcb_to_buffers             ;  Copy drivepath and drive name out of FCB
-        call    KERNEL_BDOS.copy_buffers_to_fullpath        ; Create an ESXDOS access path
-        ld      a, '*'                                      ; Not important, filepath overrides it.
-        ld      hl, KERNEL_BDOS.current_esxdos.fullpath     ; Full path of file to get stats
-        m_kr_esxdos F_OPEN
-        jr      c, .not_exist
-        push    af                                          ; Preserve file-handle
-        ld      hl, KERNEL_BDOS.current_esxdos.stats        ; 11byte stats buffer
+;
+; Read the record r0, r1 names to the DMA address. cr, ex and s2 are set to
+; the record (s2's bit 7 kept) and are not moved on, so a sequential read
+; next reads it again; rc is set for its extent.
+; Returns 0; 1 when the file has no record there, or 4 when the record's
+; extent does not exist either (the DMA is left alone, the position set);
+; 6 when r2 is not zero (the FCB is left alone).
+BDOS_F_READRAND:                                                                ;EQU 33       $21
+        call    BDOS.cache_calling_fcb
+        call    KERNEL_BDOS.random_to_position
+        jr      nz, random_past_disk
+        call    KERNEL_BDOS.read_record             ; A = 0, or 1
+        push    af
+        ld      de, BDOS.fcb_cache
+        call    KERNEL_BDOS.handle_open_fcb         ; The file's handle, if it opens
+        jr      c, .result
+        ld      hl, KERNEL_BDOS.current_esxdos.stats; 11byte stats buffer
         m_kr_esxdos F_FSTAT
-        pop     af                                          ; Restore file-handle
-        push    bc
-        push    de
-        m_kr_esxdos F_CLOSE
-        pop     de
-        pop     bc
-
-        ex      de, hl                                      ; 32-bit filesize now in bchl
-
-        ; Divide by 128
-        sla l                                               ; Shift all left by 1 bit
-        rl h
-        rl c
-        rl b
-
-        ld l, h
-        ld h, c
-        ld c, b
-        ld b, 0                                             ; Shift 8 bits right == divide by 128
-
-        pop de                                              ; Get the FCB back
-        
-        call KERNEL_BDOS.set_random_pointer_in_fcb             ; store hl in FCB random pointer (bc is thrown away!)
-
-
-        ; m_kr_unimplimented BDOS_F_SIZE_string
-        
-        jp ret1_in_a
-.not_exist:
-        pop de
-        jr ret255_in_a
-BDOS_F_SIZE_string:
-        DB "BDOS_F_SIZE", 0
-
-BDOS_F_RANDREC:
-        m_kr_unimplimented BDOS_F_RANDREC_string
-BDOS_F_RANDREC_string:
-        DB "BDOS_F_RANDREC", 0
-    ; Set the random record count bytes of the FCB to the number of the last record read/written by the sequential I/O calls.
-    ; FCB is in DE
-;    push de
-;    call get_block_num_from_fcb          ; gets sequential pointer into bcde
-;    ex de, hl                               ; Lowest 16 bits of pointer go into hl
-;    pop de
-;    call CORE_set_random_pointer_in_fcb     ; Store hl into random pointer
-        jp ret1_in_a
-
-BDOS_DRV_RESET:
-        m_kr_unimplimented BDOS_DRV_RESET_string
-BDOS_DRV_RESET_string:
-        DB "BDOS_DRV_RESET", 0
-;    call clear_current_fcb                          ; Clear out current FCB
-        jp ret0_in_a
-
-BDOS_38:
-        jp ret1_in_a
-
-BDOS_39:
-        jp ret1_in_a
-
-BDOS_F_WRITEZF:
-        jp BDOS_F_WRITERAND
-
-BDOS_41:
-BDOS_42:
-BDOS_43:
-BDOS_44:
+        jr      c, .result
+        call    KERNEL_BDOS.set_rc_from_size        ; 0 when the extent has no records
+        pop     af
+        or      a
+        jr      z, .done
+        ld      a, (BDOS.fcb_cache.rc)
+        or      a
+        jr      nz, .unwritten                      ; Records in the extent, not this one
+        ld      a, (BDOS.fcb_cache.s2)
+        and     %01111111
+        ld      b, a
+        ld      a, (BDOS.fcb_cache.ex)
+        or      b
+        jr      z, .unwritten                       ; Extent 0 exists in every file
+        ld      a, 4                                ; 4 = seek to unwritten extent
+        jr      .done
+.result:
+        pop     af
+        or      a
+        jr      z, .done
+.unwritten:
+        ld      a, 1                                ; 1 = reading unwritten data
+.done:
+        call    BDOS.restore_calling_fcb
+        ld      b, 0
         ret
 
-BDOS_F_ERRMODE:
+random_past_disk:
+        ld      a, 6                                ; 6 = seek past physical end of disk
+        ld      b, 0
         ret
 
-BDOS_46:
-BDOS_47:
-BDOS_48:
+;
+; Write the record at the DMA address as the record r0, r1 names. cr, ex
+; and s2 are set to the record and are not moved on, so a sequential write
+; next writes it again. A record past the end of the file first extends the
+; file with zeroes, so function 40, write random with zero fill, is the same
+; call. s2's bit 7 is cleared and rc set, as for a sequential write.
+; A read-only drive or file gives the R/O error, which does not return.
+; Returns 0; 2 when the write fails; 255 when the file does not exist; or 6
+; when r2 is not zero (the FCB is left alone).
+BDOS_F_WRITERAND:                                                               ;EQU 34       $22
+BDOS_F_WRITEZF:                                                                 ;EQU 40       $28
+        call    BDOS.cache_calling_fcb
+        call    KERNEL_BDOS.random_to_position
+        jr      nz, random_past_disk
+        call    KERNEL_BDOS.write_record
+        or      a
+        jp      nz, write_fail
+        jp      write_done
+
+;
+; Set r0, r1 and r2 of the FCB at DE to the size of the file it names in
+; records, a short last record counted whole: the number of the record after
+; the last. CP/M's largest file is 65536 records, r2 = 1; a larger FAT file is
+; given as that.
+; Returns 0, or 255 if there is no such file.
+BDOS_F_SIZE:                                                                    ;EQU 35       $23
+        call    BDOS.cache_calling_fcb
+        call    KERNEL_BDOS.handle_open_fcb         ; A = esxdos handle of the file
+        jp      c, ret255_in_a                      ; No such file
+        ld      hl, KERNEL_BDOS.current_esxdos.stats; 11byte stats buffer
+        m_kr_esxdos F_FSTAT
+        jp      c, ret255_in_a
+        ld      hl, (KERNEL_BDOS.current_esxdos.stats+7); DE:HL = file size
+        ld      de, (KERNEL_BDOS.current_esxdos.stats+9)
+        ld      bc, 127                             ; Round up to a whole record
+        add     hl, bc
+        jr      nc, .rounded
+        inc     de
+        ld      a, d
+        or      e
+        jr      z, .largest                         ; Past 4G
+.rounded:
+        sla     l                                   ; D:E:H = size / 128, carry its bit 24
+        rl      h
+        rl      e
+        rl      d
+        jr      c, .largest
+        ld      a, d
+        or      a
+        jr      nz, .largest                        ; 65536 records or more
+        ld      a, h
+        ld      (BDOS.fcb_cache.r0), a
+        ld      a, e
+        ld      (BDOS.fcb_cache.r1), a
+        xor     a
+        ld      (BDOS.fcb_cache.r2), a
+        jp      restore_fcp_ret0_in_a
+.largest:
+        xor     a
+        ld      (BDOS.fcb_cache.r0), a
+        ld      (BDOS.fcb_cache.r1), a
+        inc     a
+        ld      (BDOS.fcb_cache.r2), a              ; 65536 records
+        jp      restore_fcp_ret0_in_a
+
+;
+; Set r0, r1 and r2 of the FCB at DE to the record its cr, ex and s2 name.
+; Returns 0.
+BDOS_F_RANDREC:                                                                 ;EQU 36       $24
+        call    BDOS.cache_calling_fcb
+        call    KERNEL_BDOS.get_block_num_from_fcb  ; BCDE = record number
+        ld      a, e
+        ld      (BDOS.fcb_cache.r0), a
+        ld      a, d
+        ld      (BDOS.fcb_cache.r1), a
+        ld      a, c
+        ld      (BDOS.fcb_cache.r2), a
+        jp      restore_fcp_ret0_in_a
+
+;
+; Reset the drives whose bits are set in DE: their open files are closed,
+; and they are logged out and set read-write again. Returns 0.
+BDOS_DRV_RESET:                                                                 ;EQU 37       $25
+        call    KERNEL_BDOS.handle_close_drives
+        ld      a, e
+        cpl
+        ld      e, a
+        ld      a, d
+        cpl
+        ld      d, a                                ; DE = the drives to keep
+        ld      hl, KERNEL_BDOS.login_vector
+        call    .keep
+        ld      hl, KERNEL_BDOS.ro_vector
+        call    .keep
+        jp      ret0_in_a
+.keep:
+        ld      a, (hl)
+        and     e
+        ld      (hl), a
+        inc     hl
+        ld      a, (hl)
+        and     d
+        ld      (hl), a
         ret
+
+;
+; MP/M and CP/M 3 functions that CP/M 2.2 does not have. They return A=0,
+; HL=0, as CP/M 2.2 does for a function number it does not know.
+BDOS_38:            ; DRV_ACCESS    MP/M
+BDOS_39:            ; DRV_FREE      MP/M
+BDOS_41:            ; Test and write record
+BDOS_42:            ; F_LOCK        MP/M
+BDOS_43:            ; F_UNLOCK      MP/M
+BDOS_44:            ; F_MULTISEC    MP/M2
+BDOS_F_ERRMODE:     ; F_ERRMODE     CP/M 3
+BDOS_46:            ; DRV_SPACE     MP/M2
+BDOS_47:            ; P_CHAIN       MP/M2
+BDOS_48:            ; DRV_FLUSH     MP/M2
+        jp      ret0_in_a
+
+;
+; Report a write to a read-only drive or file as CP/M 2.2 does (manual
+; p. 1-45): "BDOS Error on d: R/O", or "BDOS Error on d: File R/O", then wait
+; for a key and warm boot. A = the drive (0-15). Does not return.
+; bdos_error takes the message after "d:" in HL.
+error_ro_drive:
+        ld      hl, msg.ro
+        jr      bdos_error
+error_ro_file:
+        ld      hl, msg.file_ro
+bdos_error:
+        push    hl
+        push    af
+        ld      a, KERNEL_KEYBOARD.CR
+        call    KERNEL_TERM.process
+        ld      a, KERNEL_KEYBOARD.LF
+        call    KERNEL_TERM.process
+        ld      hl, msg.error_on
+        call    kr_print_string_hl
+        pop     af
+        add     a, 'A'
+        call    KERNEL_TERM.process
+        ld      a, ':'
+        call    KERNEL_TERM.process
+        pop     hl
+        call    kr_print_string_hl
+        call    BIOS_CONIN                          ; Any key...
+        jp      BIOS.entry_WBOOT                    ; ...then a warm boot
 
 ;-----------------------------------------------------------------------------
 ;-- Size reducing utility methods - for common >3byte things we do
@@ -1693,11 +1782,6 @@ ret0_in_a:
         ld b, a
         ret
     
-ret1_in_a:
-        ld a, 1
-        ld b, 0
-        ret
-        
 ret255_in_a:
         ld a, 255
         ld b, 0
@@ -1710,5 +1794,11 @@ ret255_in_a:
 msg:
 .error_on:
         db 'BDOS Error on ',0
+.ro:
+        db ' R/O',0
+.file_ro:
+        db ' File R/O',0
+.select:
+        db ' Select',0
 
     ENDMODULE

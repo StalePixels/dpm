@@ -56,6 +56,22 @@
 ;    N.    The TYPE and LIST Commands mask the MSB of each byte, so that
 ;        files created by editors such as EDIT80 are "printable"
 
+;    DP/M ASSEMBLY *****
+;    This file is assembled on its own into CCP.COM, an image of the CCP at
+;    CCP_A ($D000). The kernel reads CCP.COM from its install folder at every
+;    cold and warm boot, so another CCP.COM can replace it. Any CCP.COM must
+;    start with the two jumps at ENTRY: the BIOS enters at CCP_A+3 with the
+;    drive and user in C, and the file must fit below the BDOS at BDOS_A.
+
+    DEVICE zxspectrumnext
+    OPT reset --zxnext --syntax=abfw
+    CSPECTMAP CCP.map
+
+    INCLUDE "inc/addresses.asm"                 ; CCP_A, TBUFF_A
+    INCLUDE "inc/constants.asm"                 ; TRUE, FALSE
+    INCLUDE "inc/ascii.asm"                     ; KERNEL_KEYBOARD.CR, LF, ESC
+    INCLUDE "inc/common/debug.asm"              ; m_CSpect_BREAK
+
         ORG    CCP_A        ; START OF CCP IN MEMEORY IN YOUR SYSTEM
         
 ccp_start:
@@ -1211,15 +1227,12 @@ CMD_USER:
         jp      RESTART_CCP.drive_changed        ; RESTART CCP (NO DEFAULT LOGIN)
         
 
-; Send escape sequence to clear screen to terminal driver
+; Send VT52 escape sequences to clear screen to terminal driver
 CMD_CLS:    
-        ld      a, 27  : call CONOUT        ; Clear screen
-        ld      a, '[' : call CONOUT
-        ld      a, '2' : call CONOUT
-        ld      a, 'J' : call CONOUT
-        ld      a, 27  : call CONOUT      ;  Move cursor home
-        ld      a, '[' : call CONOUT
+        ld      a, 27  : call CONOUT        ; Move cursor home
         ld      a, 'H' : call CONOUT
+        ld      a, 27  : call CONOUT        ; Clear to end of screen
+        ld      a, 'J' : call CONOUT
         jp      RESTART_CCP.drive_changed        ; RESTART CCP (NO DEFAULT LOGIN)
         
 ;    
@@ -1292,7 +1305,7 @@ RUN_COM:
         POP     HL                  ; GET ADDRESS OF NEXT SECTOR
         LD      DE,128              ; MOVE 128 BYTES PER SECTOR
         ADD     HL,DE               ; PT TO NEXT SECTOR IN HL
-        LD      DE,ENTRY-128        ; ARE WE GOING TO WRITE OVER CCP?
+        LD      DE,ENTRY            ; WOULD THE NEXT SECTOR WRITE OVER THE CCP?
         LD      A,L                 ; COMPARE ADDRESS OF NEXT SECTOR (HL)
         SUB     E                   ;   TO START OF CCP (DE)
         LD      A, H
@@ -1352,13 +1365,7 @@ RUN_COM:
 	    call    CRLF                    ; Newline before we execute our command
         call    DEFDMA                  ; Set DMA to point to commandline buffer
         call    SETUD                   ; Set User/Disk
-        
-            ; jr $
-            
         call    TPA
-        
-            call PRINT : db 'TPA Returned',0; SUCCESS messages
-            
         call    SETU0D                  ; Set default user+disk after return
         call    LOGIN                   ; Log in the disk
         jp      RESTART                 ; Restart CCP
@@ -1516,5 +1523,6 @@ ccpBinPcHi EQU     (100*ccpBinSz)/(256*12)
 ccpBinPcLo EQU     ((100*ccpBinSz)%(256*12))*10/(256*12)
         DISPLAY "ccp LEN\t:\t",/D,ccpBinSz,"B\t(",/D,ccpBinPcHi,".",/D,ccpBinPcLo,"% of ccp command 3kiB)"
         
-        SAVEBIN "../build/CCP",ccp_start,ccpBinSz
+        ASSERT  ccp_end <= BDOS_A           ; The kernel reads CCP.COM up to the BDOS
+        SAVEBIN "../build/CCP.COM",ccp_start,ccpBinSz
         DISPLAY "======================================================= <"

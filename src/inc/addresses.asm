@@ -28,3 +28,11 @@ TPA_A           EQU     $0100       ; BASE OF TPA
     ;; Tilemap Textmode
 tilemapAddr             EQU     $6400
 tilemapHiByte           EQU     $64
+tileGfxAddr             EQU     $5C00       ; Tile definitions, 8 bytes per tile (NextReg $6F)
+
+    ;; Text cursor: tile 0 is drawn over the cell at the cursor and shows the
+    ;; character there in inverse. The character it covers is kept in tile 1's
+    ;; first byte, so bank 5 alone holds the whole screen. Tiles 0-31 are never
+    ;; printed, as codes below 32 are control codes.
+cursorTile              EQU     0
+cursorCharAddr          EQU     tileGfxAddr+8

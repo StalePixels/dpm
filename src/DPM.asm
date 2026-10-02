@@ -19,6 +19,7 @@
     INCLUDE "inc/addresses.asm"                 ; Various hard coded addresses (ORGs, etc)
     INCLUDE "inc/constants.asm"                 ; ZX Next constants
     INCLUDE "inc/esxdos.asm"                    ; ESXDOS macros and functions parameters
+    INCLUDE "inc/ascii.asm"                     ; ASCII control codes, shared with CCP.asm
     INCLUDE "inc/structs.asm"                   ; Application specific structures
     INCLUDE "inc/common/macros.asm"             ; Macros - all macros starting with m_
         
@@ -27,9 +28,8 @@
                                         ; Generate our dependencies, which are appended to the dot
     INCLUDE "BIOS.asm"                          ; BIOS main mem
     INCLUDE "BDOS.asm"                          ; BDOS main mem
-    INCLUDE "CCP.asm"                           ; CP/M 2.2 main shell, modified for DPM
-                                        ; Generate our kernel last, as it includes artifacts of above
     INCLUDE "kernel.asm"                        ; Main kernel @ 0x8000 
+                                        ; The CCP is CCP.asm, assembled on its own into CCP.COM
 
 
     ORG     ESX_A
@@ -231,6 +231,18 @@ pause:
         m_CSpect_BREAK
 
 
+;-----------------------------------------------------------------------------
+; -- Exit to NextZXOS from the kernel with an error report. Entered with the
+;    kernel paged in and KERNEL.enable_esxdos_rom done, so this dot command's
+;    RAM is at $2000-$3FFF. HL = the message, in this dot command's RAM, its
+;    last character with bit 7 set.
+;-----------------------------------------------------------------------------
+kernel_error_exit:
+        ld      sp, dot_stack               ; A stack that stays mapped while the MMUs are restored
+        ld      (mem_exit.SMC_error), hl    ; The message, given back to NextZXOS at the end of mem_exit
+        scf                                 ; Carry flag signifies the error
+        jr      bootrom_exit
+
 exit_kernel:
 .SMC_dotstack EQU $+1
         ld      sp, 0xAAAA                  ; restore original stack pointer, as above 0xAAAA is SMC.
@@ -324,6 +336,11 @@ mem_exit:
         call zxn_FreePage
         ; call esxDOS.fClose
         pop     af                          ; So we have the correct exit states again.
+        jr      nc, state_exit
+                                        ; Carry: kernel_error_exit came this way
+.SMC_error EQU $+1
+        ld      hl, 0xAAAA                  ; Its message, 0xAAAA replaced by kernel_error_exit
+        ld      a, 0                        ; A=0 with carry: HL is the error message (keeps the flags)
                                             ; & fallow through
 state_exit:                             ; slightly inefficent if following through, but good enough
         push    af                          ; Preserve the flags, and A, for exit routine
@@ -339,9 +356,11 @@ state_exit:                             ; slightly inefficent if following throu
                                             ; & fallow through
 .SMC_stack EQU $+1
         ld      sp, 0xAAAA                  ; restore original stack pointer, as above 0xAA is SMC.
+        ld      e, a                        ; Keep A, the exit code, while I is restored
         pop     bc                          ; Get our stored I, in C, off the stack.
         ld      a, c                        ; Copy C back into A
         ld      i, a                        ; And move A back into I, for original Interrupts
+        ld      a, e                        ; The exit code again (no flags change)
         pop     iy                          ; these were the only values we pushed onto the stack
         pop     ix                          ; at startup before we switched to our own stack
                                             ; & fallow through
@@ -370,6 +389,9 @@ end_state:
 
 command_buffer:
     DS  262, $AA                            ; 128bytes of stack set to $AA for to aide debugging
+
+ccp_error:                              ; Error report built by the kernel when CCP.COM cannot be loaded
+    DS  DotErr.CannotLoadLen+ESXDOS_MAX_PATH_LENGTH, $00
     
 dot_end:                                   ; after last machine code byte which should be part of the binary
 ;; Meta stuffs for build

@@ -18,24 +18,23 @@ entry:
         ; The function number is passed in Register C.
         ; The parameter is passed in DE.
         ; Result returned in A or HL. Also, A=L and B=H on return for compatibility reasons.
-        ; If function number is unknown we return A=0.
+        ; A function number past the end of the table returns A=L=0, B=H=0,
+        ; as the CP/M 2.2 manual gives for a number out of range.
 
         ld      a, c                    ; copy parameter from C to A
         cp      49
         jr      c, .exec_func
-
-        ; db 'BAD BDOS CALL: ',0
-        
-        m_CSpect_BREAK
-        jp      $0000                    ; Totally abandon anything after a bad BDOS call!
+        xor     a
+        ld      b, a
+        ld      h, a
+        ld      l, a
+        ret
 
 .exec_func:
-        ld      (BIOS.internal_TEARDOWN.SMC_exitstack), sp
+        ld      (.exit_stack), sp            ; Keep the caller's stack pointer, for the way out
         ld      sp, BIOS.stack
 
-        push    hl              ; WARNING: intentionally inbalanced...
         push    de
-        
         ld      hl, kernel_jump_table        ; Base entry in jump table
         ld      e, c                         ; Function number into DE
         ld      d, 0                         ;
@@ -43,25 +42,37 @@ entry:
         add     hl, de                       ; ...twice - to get right (16bit) address
 
         ld      e, (hl): inc hl: ld d, (hl)  ; ld de, (hl)
-        ex      de, hl          ; HL now holds address of the BDOS call
-        
-        pop     de              ; & DE the parameters for the call
-                                ; WARNING: pop hl occours in the BIOS.internal_KERNEL_call
-        call    BIOS.internal_KERNEL_call
-       
-        ; Now return. So anything that wants to return a value in HL should do ld a,l ld b,h first
-        ld      l, a                         ; This is how the BDOS returns values.
-        ld      h, b                         ; Note: that it is important to some 
-        ret                                  ; programs that both A and B are set.
+        ex      de, hl                       ; HL now holds address of the BDOS call
+        ld      (.SMC_kernel_func), hl
+        pop     de                           ; & DE the parameters for the call
 
-; internal_TEARDOWN:
-internal_TEARDOWN.SMC_MMU4 EQU $+3
+.SMC_MMU4_kernel EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
-internal_TEARDOWN.SMC_MMU5 EQU $+3
+.SMC_MMU5_kernel EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
-        ;; return stack to original location
-internal_TEARDOWN.SMC_exitstack EQU $+1
-        ld      sp, 0xAAAA                  ; restore original stack pointer, as above 0xAAAA is SMC.
+
+    IF DPM_DEBUG
+            ld      a, l : call KERNEL_DEBUG.tm_a_loc76
+            ld      a, h : call KERNEL_DEBUG.tm_a_loc78
+    ENDIF
+
+.SMC_kernel_func EQU $+1
+        call    0xAAAA                       ; Kernel routine to call, 0xAAAA is SMC.
+
+.SMC_MMU4_userland EQU $+3:
+        nextreg	MMU4_8000_NR_54, 0xAA
+.SMC_MMU5_userland EQU $+3:
+        nextreg	MMU5_A000_NR_55, 0xAA
+        ld      sp, (.exit_stack)            ; Back to the caller's stack
+
+        ; Kernel routines return their value in A, and B for the high byte of
+        ; a 16-bit value. The BDOS returns A = L and B = H in all cases.
+        ld      l, a
+        ld      h, b
+        ret
+
+.exit_stack:
+        dw      0
 
 
 ; Copy FCB (pointed to by DE) to cache in BDOS
@@ -169,6 +180,27 @@ copy_dma_in_kernel:
         pop     de
         ret
 
+;
+; Copy BC bytes from HL to DE with userland paged in over $8000-$BFFF. One end
+; is a userland address anywhere in 64K, the other must be always-mapped
+; memory here in the BDOS. Should only be called while the kernel is paged in.
+; Dirties HL, DE, BC
+copy_userland:
+        push    af
+        ;; Ensure that all the userland memory is available, incase the userland end resides behind kernel
+.SMC_MMU4_userland EQU $+3:
+        nextreg	MMU4_8000_NR_54, 0xAA
+.SMC_MMU5_userland EQU $+3:
+        nextreg	MMU5_A000_NR_55, 0xAA
+        ldir                                ; ldi repeat. Go.
+        ;; Restore kernel
+.SMC_MMU4_kernel EQU $+3:
+        nextreg	MMU4_8000_NR_54, 0xAA
+.SMC_MMU5_kernel EQU $+3:
+        nextreg	MMU5_A000_NR_55, 0xAA
+        pop     af
+        ret
+
 filesize_buffer:
         ds 6
 
@@ -202,47 +234,46 @@ fcb_cache:
 .cr:
         db      0           ; Current Record Number
 .extra_bytes:
-        ds      3
+.r0:
+        db      0           ; Random Record Number, low byte
+.r1:
+        db      0           ; ...middle byte
+.r2:
+        db      0           ; ...high byte
         
 
 dma_cache:
 
         ds  $80, $00
         
+; Console strings (function 9) and edited lines (function 10) are staged here:
+; for function 10, +0 is the count read and +1 on the characters.
+con_cache:
+        ds  $100, $00
 
+
+; Disk parameter block for every drive (function 31), RunCPM's values: an
+; 8 MB disk of 4K blocks with 1024 directory entries. The values are a
+; plausible fake; they do not describe the FAT card.
+DPB_DSM         EQU     2039            ; Blocks on the disk, less one
 dpblk:
-; Fake disk parameter block for all disks
-        ; defw	80		;sectors per track
-        ; defb	5		;block shift factor	(5 & 31 = 4K Block Size)
-        ; defb	31		;block mask
-        ; defb	3		;extent mask
-        ; defw	196		;disk size 197 * 4k = 788k
-        ; defw	127		;directory max
-        ; defb	$80		;alloc 0	((DRM + 1) * 32) / 4096 = 1, so 80H
-        ; defb	0		;alloc 1
-        ; defw	0		;check size ( 0 = fixed disk )
-        ; defw	0		;track offset ( 0 = no reserved system tracks )
-
-; These ones were copied from runCPM!
-        dw	64		;sectors per track
+        dw	256		;sectors per track
         db	5		;block shift factor	(5 & 31 = 4K Block Size)
         db	$1F		;block mask
-        db	1		;extent mask
-        db	$FF		;disk size
-        db	$07		;disk size
-        db	$FF		;directory max
-        db	$03		;directory max
-        db	$FF		;alloc 0	((DRM + 1) * 32) / 4096 = 1, so 80H
+        db	1		;extent mask: a directory entry holds two 16K extents
+        dw	DPB_DSM		;disk size in blocks, less one
+        dw	1023		;directory entries, less one
+        db	$FF		;alloc 0	((DRM + 1) * 32) / 4096 = 8 directory blocks
         db	0		;alloc 1
         dw	0		;check size ( 0 = fixed disk )
-        dw	2		;track offset ( 0 = no reserved system tracks )
+        dw	1		;track offset
 
+; Allocation vector for every drive (function 27): one bit per block of the
+; DPB above. Only the directory blocks are marked in use.
 diskalloc:
-        db 0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0
-        db 0,0,0,0,0,0,0,0,0
-    
+        db      $FF
+        ds      DPB_DSM/8, 0
+
 dma_address:
         ds 2
 
@@ -254,10 +285,6 @@ current_user:
 temp_fcb:
         ds 36
 
-
-store_target:
-        dw 0                            ; rename target FCB ptr — BDOS (always mapped) not kernel
-    
 greeting:
         DB "Fake BDOS Banner", 0
 

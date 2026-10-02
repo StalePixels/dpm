@@ -16,7 +16,8 @@ TXT2BAS:=txt2bas
 IMAGE:=2gb/cspect-next-2gb.img
 MOUNT:=/Volumes/DPM
 # NextZXOS dot-commands live in DOT_DIR (so build/DPM installs as .DPM);
-# EMU_PATH is where the CP/M emulated drives (A/0..15, B/0..15) live.
+# EMU_PATH is DP/M's install folder: CCP.COM, and the CP/M emulated drives
+# (A/0..15, B/0..15).
 DOT_DIR:=$(MOUNT)/dot
 EMU_PATH=$(MOUNT)/DPM
 # autoexec.bas source (tracked, human-readable NextBASIC) -> tokenised onto image.
@@ -39,7 +40,7 @@ MAME_RUN:=$(MAME) $(MAME_SYS) -hard1 $(IMAGE) \
 		-window -nomaximize -resolution 1024x768 -nothrottle \
 		-debug -plugin nextbreak,debugstart,nextfaststart
 
-.PHONY: dev emulate turbo dot install_emu autoexec mount_image unmount_image \
+.PHONY: dev emulate turbo dot ccp install_emu autoexec mount_image unmount_image \
         cspect cspect_turbo setup_emulator setup_emulator_testfiles \
         _setup_dirs _setup_files
 
@@ -64,14 +65,21 @@ dot:
 	$(CAT) build/kernel >> build/DPM		#   & Append kernel to dot command
 	$(CAT) build/BIOS >> build/DPM			#    & Append BIOS to dot command
 	$(CAT) build/BDOS >> build/DPM			#    & Append BDOS to dot command
-	$(CAT) build/CCP >> build/DPM			#    & Append CCP to dot command
 
-# Mount the image, copy the freshly built dot in, then unmount so the image
-# is free for MAME (macOS and MAME must not hold the FAT volume at once).
+# The CCP, assembled on its own. The kernel loads it from EMU_PATH/CCP.COM
+# at every cold and warm boot.
+ccp:
+	cd src && $(SJASMPLUS) CCP.asm
+
+# Mount the image, copy the freshly built dot and CCP.COM in, then unmount so
+# the image is free for MAME (macOS and MAME must not hold the FAT volume at
+# once).
 install_emu:
 	@$(HDIUTIL) detach $(MOUNT) >/dev/null 2>&1 || true
 	$(HDIUTIL) attach -nobrowse -imagekey diskimage-class=CRawDiskImage $(IMAGE)
 	$(CP) build/DPM $(DOT_DIR)/DPM
+	$(MKDIR) $(EMU_PATH)
+	$(CP) build/CCP.COM $(EMU_PATH)/CCP.COM
 	$(HDIUTIL) detach $(MOUNT)
 
 # Tokenise dev/autoexec.bas.txt and install it onto the image as the boot
@@ -92,7 +100,7 @@ mount_image:
 unmount_image:
 	$(HDIUTIL) detach $(MOUNT)
 
-dev: dot install_emu turbo
+dev: dot ccp install_emu turbo
 
 # Mount the image, create the CP/M drive tree (C:/DPM/{A,B}/{0..15}) that the
 # kernel's setup probes with F_OPENDIR, then unmount. (_setup_dirs does the

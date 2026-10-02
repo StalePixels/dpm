@@ -61,8 +61,10 @@ internal_KERNEL_call:
 .SMC_MMU5_kernel EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
         
+    IF DPM_DEBUG
             ld      a, l : call KERNEL_DEBUG.tm_a_loc76
             ld      a, h : call KERNEL_DEBUG.tm_a_loc78
+    ENDIF
         
         ; Set our destination jump into kernel
         ld      (.internal_KERNEL_func), hl
@@ -81,23 +83,31 @@ internal_TEARDOWN.SMC_exitstack EQU $+1
 
         ret
 
+; Warm boot: the CCP comes back on the drive and user kept in USERDRIVE_A
 reentry_BOOTROOM:
 .SMC_MMU4_kernel EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_kernel EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
+        ld      sp, BIOS.stack
+        call    KERNEL.BIOS_WBOOT
+        ld      a, (USERDRIVE_A)        ; User in the high nibble, drive in the low
+        jr      entry_BOOTROM.start_ccp
+
+; Cold boot: the CCP starts on drive A, user 0
 entry_BOOTROM:
         ld      sp, BIOS.stack
         call    KERNEL.BOOTROM
-        
+        xor     a                       ; Set the drive and user to 0
+        ld      (USERDRIVE_A), a        ; Store them in base memory
+
+.start_ccp:
 .SMC_MMU4_userland EQU $+3
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_userland EQU $+3
         nextreg	MMU5_A000_NR_55, 0xAA
 
-        xor     a                       ; Set the drive and user to 0
-        ld      (USERDRIVE_A), a        ; Store them in base memory
-        ld      c, a
+        ld      c, a                    ; The CCP takes the drive and user in C
         ld      hl, CCP_A+3             ;CCP_A+3 moves us past the first jump instruction
         jp      hl
         

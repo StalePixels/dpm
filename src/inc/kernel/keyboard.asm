@@ -9,18 +9,34 @@
 ;-----------------------------------------------------------------------------
     MODULE KERNEL_KEYBOARD
 
-; Scans the keyboard matrix, returns ASCII value in A, or $FF is no key pressed
+; Scans the keyboard matrix, returns ASCII value in A, or 0 if no key pressed.
+; keypos is left holding that key's matrix position, $FF if none.
 read_char_a:
     call    read_matrix                     ; Get matrix inputs
+    ld      (status), a                     ;
+    ret
+
+; Scans for a new keypress. Returns its ASCII value in A once per press, and
+; 0 while no key is down or the same key is still held. A press is tracked by
+; its matrix position, so letting go of a shift key before the key itself
+; gives no second character. CAPS SHIFT+2 toggles caps lock and returns 0.
+; Dirties HL, BC, DE
+read_new_key:
+    call    read_char_a                     ; This scan's key, 0 if none
+    ld      b, a
+    ld      a, (keypos)                     ; Where it is on the matrix
+    ld      hl, prevpos                     ; Where the last scan's key was
+    cp      (hl)                            ; Same key (or still none)?
+    jr      z, .none                        ; ...Yes, nothing new
+    ld      (hl), a                         ; ...No, remember it ($FF on release)
+    ld      a, b
     cp      CAPS
-    jr      nz, .status_and_ret
-    
+    ret     nz                              ; The new key, or 0 if one was let go
     ld      a, (cl_status)
     cpl                                     ; Flip all bits in CapsLock_status
     ld      (cl_status), a
-    xor     a                               ; Zero A
-.status_and_ret
-    ld      (status), a                     ;
+.none:
+    xor     a                               ; A=0, no new key
     ret
     
 ;
@@ -63,10 +79,21 @@ read_matrix:
     jr      nz, .rotatebits                 ; If not end of line, loop
     inc     de                              ; Inc Matrix Line Pointer
     djnz    .rotatelines                    ; Dec. rows (B) & loop if not zero
+    ld      a, $FF
+    ld      (keypos), a                     ; No key down
     xor     a                               ; Fast zero set
     ret
 ;
 .foundbit:
+    ld      a, 8                            ; Matrix position = row * 5 + bit
+    sub     b                               ; Row, 0-7
+    ld      e, a
+    add     a, a
+    add     a, a
+    add     a, e                            ; Row * 5
+    add     a, 5
+    sub     c                               ; Plus bit, 0-4
+    ld      (keypos), a
     ld      a, (hl)                         ; Set A to value pointed by HL
     or      a                               ; set zero flag, if applicable
     ret 
@@ -85,7 +112,8 @@ read_matrix:
     ret
 ;
 cl_status       db      $00
-prevkey         db      $ff
+prevpos         db      $ff     ; Matrix position of the key read_new_key last saw
+keypos          db      $ff     ; Matrix position of the key at the last scan
 status	        db      0
 counter         db      0
 ;
@@ -98,23 +126,6 @@ MatrixLine5     db      0
 MatrixLine6     db      0
 MatrixLine7     db      0
 ;
-ESC             EQU     $1b
-CTR_C           EQU     $03     ;control-c
-CTR_E           EQU     $05     ;control-e
-BS              EQU     $08     ;backspace
-
-TAB             EQU     $09     ;tab
-LF              EQU     $0A     ;line feed
-FF              EQU     $0C     ;form feed
-CR              EQU     $0D     ;carriage return
-
-CTR_P           EQU     $10     ;control-p
-CTR_R           EQU     $12     ;control-r
-CTR_S           EQU     $13     ;control-s
-CTR_U           EQU     $15     ;control-u
-CTR_X           EQU     $18     ;control-x
-CTR_Z           EQU     $1A     ;control-z (end-of-file mark)
-DEL             EQU     $7F     ;rubout
 CAPS            EQU     $FF
 
                         
@@ -130,8 +141,8 @@ MAP_def:        DB      0x00, "z",  "x",  "c",  "v"
 MAP_CS:         DB      0x00, "Z",  "X",  "C",  "V"
                 DB      "A",  "S",  "D",  "F",  "G"
                 DB      "Q",  "W",  "E",  "R",  "T"
-                DB      BS,   CAPS, 0x00, 0x00, 0x08
-                DB      DEL,  TAB,  0x0c, 0x0b, 0x0a
+                DB      BS,   CAPS, 0x00, 0x00, CTR_S   ; Cursor keys give WordStar's
+                DB      DEL,  TAB,  0x04, CTR_E,CTR_X   ; ^S left, ^D right, ^E up, ^X down
                 DB      "P",  "O",  "I",  "U",  "Y"
                 DB      CR,   "L",  "K",  "J",  "H"
                 DB      ESC,  0x00, "M",  "N",  "B"
@@ -166,8 +177,8 @@ MAP_CL:         DB      0x00, "Z",  "X",  "C",  "V"
 MAP_CL_CS:      DB      0x00, "Z",  "X",  "C",  "V"
                 DB      "A",  "S",  "D",  "F",  "G"
                 DB      "Q",  "W",  "E",  "R",  "T"
-                DB      BS,   CAPS, 0x00, 0x00, 0x08
-                DB      DEL,  TAB,  0x0c, 0x0b, 0x0a
+                DB      BS,   CAPS, 0x00, 0x00, CTR_S   ; Cursor keys give WordStar's
+                DB      DEL,  TAB,  0x04, CTR_E,CTR_X   ; ^S left, ^D right, ^E up, ^X down
                 DB      "P",  "O",  "I",  "U",  "Y"
                 DB      CR,   "L",  "K",  "J",  "H"
                 DB      ESC,  0x00, "M",  "N",  "B"

@@ -27,14 +27,9 @@ strings:
 .called:
         DB "CALLED kr_", 0
 
-.restarting:
-        DB      "Restarting...", 10, 13, 0
+.ccp_name:
+        DB "CCP.COM", 0                     ; The CCP, loaded from config.install_path
 
-ccp_image:
-        DISPLAY "kernel CCPimg\t:\t",/H,$
-        INCBIN "../build/CCP"
-
-        DISPLAY "kernel CCPend\t:\t",/H,$
 cp437_font:
         DISPLAY "kernel glyphs\t:\t",/H,$
         INCBIN "../assets/CP437-256.UDG"

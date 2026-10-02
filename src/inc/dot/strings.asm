@@ -36,4 +36,7 @@ NextRequired:
         DC      "Spectrum Next required"
 NotEnoughMemory:
         DC      "Not enough free memory banks"
+CannotLoad:                             ; The kernel adds the CCP's path (Null Term)
+        DB      "Cannot load ", 0
+CannotLoadLen   EQU     $-CannotLoad-1
     ENDMODULE
