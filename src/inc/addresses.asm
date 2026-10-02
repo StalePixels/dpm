@@ -11,9 +11,18 @@
     ;; Base addresses for various modules
 ESX_A           EQU     $2000       ; Base address of ESXDOS loader
 KERNEL_A        EQU     $8000       ; Base address of kernel
-BIOS_A          EQU     $FA00       ; Base address of BIOS
-BDOS_A          EQU     $E000       ; Base address of BDOS
-CCP_A           EQU     $D000       ; Base address of CCP
+BIOS_A          EQU     $FE00       ; Base address of BIOS
+BDOS_A          EQU     $FA00       ; Base address of BDOS
+CCP_A           EQU     $F200       ; Base address of CCP
+BDOS_ENTRY_A    EQU     BDOS_A+6    ; BDOS entry, the address at $0006: the top of the TPA
+
+    ;; CCP layout, as CP/M 2.2's CCP has it
+CCP_RUN_A       EQU     CCP_A       ; Entry that runs the command line in the buffer
+CCP_PROMPT_A    EQU     CCP_A+3     ; Entry that empties the buffer and shows the prompt
+CCP_CBUFF_A     EQU     CCP_A+7     ; Length of the command line in the buffer
+CCP_CIBUFF_A    EQU     CCP_A+8     ; Text of the command line, ending in 0
+CCP_CMD_MAX     EQU     99          ; Longest command line put in the buffer at cold boot
+AUTOCMD_SIZE    EQU     CCP_CMD_MAX+2 ; That line as DP/M keeps it: length, text, 0
 
     ;; CPM hook addresses
 REBOOT_A        EQU     $0000       ;reboot system

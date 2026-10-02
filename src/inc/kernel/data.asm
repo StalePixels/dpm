@@ -59,6 +59,9 @@ dynamic_data:
 .console_cache
         DB  0
 
+.autocmd                                    ; Command line from the dot command's arguments, run
+        DS  AUTOCMD_SIZE, $00               ; by the CCP at cold boot: length, text, 0
+
 ;    
 ;    FILE    CONTROL BLOCK
 ;    

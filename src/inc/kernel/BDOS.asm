@@ -43,14 +43,14 @@ handle_make_key:
         ld      a, (de)                     ; Drive byte, 0 = current disk, 1-16 = A-P
         or      a
         jr      nz, .drive_given
-        ld      a, (BDOS.current_disk)      ; Current disk is indexed from 0...
+        ld      a, (current_disk)      ; Current disk is indexed from 0...
         inc     a                           ; ...so adjust it to match the FCB
 .drive_given:
         dec     a                           ; Drives indexed from 0 again
         and     %00001111
         ld      (hl), a
         inc     hl
-        ld      a, (BDOS.current_user)      ; FCBs don't carry the user
+        ld      a, (current_user)      ; FCBs don't carry the user
         ld      (hl), a
         inc     hl
         ld      b, 11                       ; 8+3 name
@@ -383,14 +383,14 @@ copy_fcb_to_buffers:
         ld      (KERNEL_BDOS.current_esxdos.diskname), a; Save this into the cache, to go with file and path
         cp      0                           ; 0 = no explicit drive passed
         jr      nz, .drive_and_user_to_path ;   Yes, use that
-        ld      a, (BDOS.current_disk)      ;   No, load default, which is indexed from 0
+        ld      a, (current_disk)      ;   No, load default, which is indexed from 0
         inc     a                           ;       Adjust 0-15 to 1-16
 .drive_and_user_to_path:
         dec     a                           ; +1&-1 Hack works, drives indexed from 0 again.
         and     %00001111
         ld      b, a                        ; Copy drive letter into B
         call    set_login_drive
-        ld      a, (BDOS.current_user)      ; Load current user, FCBs don't carry this
+        ld      a, (current_user)      ; Load current user, FCBs don't carry this
         ld      c, a                        ; Copy User number letter into c
         
         ld      hl, KERNEL_BDOS.current_esxdos.filepath
@@ -491,7 +491,7 @@ fcb_drive:
         ld      a, (BDOS.fcb_cache)
         or      a
         jr      nz, .given
-        ld      a, (BDOS.current_disk)      ; Current disk is indexed from 0...
+        ld      a, (current_disk)      ; Current disk is indexed from 0...
         inc     a                           ; ...so adjust it to match the FCB
 .given:
         dec     a
@@ -600,6 +600,71 @@ write_record:
         jp      KERNEL.error_ro_file
 
 ;
+; Shorten the file held by the slot at HL to the cached FCB's rc, as CP/M's
+; close does when it writes a lowered rc to the directory (the CCP shortens
+; $$$.SUB this way). Only when the file ends within the extent the FCB names
+; and rc records from that extent's start are fewer than the file holds; a
+; read-only handle is left alone. cr is kept.
+; Returns carry set if esxdos fails. Dirties AF, BC, DE, HL
+truncate_to_rc:
+        ld      a, (hl)                     ; HANDLE.in_use
+        cp      HANDLE_RW
+        ret     nz                          ; Read only (carry clear)
+        inc     hl
+        ld      a, (hl)                     ; HANDLE.esx
+        ld      (io_handle), a
+        ld      hl, current_esxdos.stats
+        m_kr_esxdos F_FSTAT
+        ret     c
+        ld      a, (BDOS.fcb_cache.cr)
+        push    af                          ; The caller's cr
+        ld      a, 128
+        ld      (BDOS.fcb_cache.cr), a
+        ld      de, BDOS.fcb_cache
+        call    get_block_num_from_fcb
+        call    KERNEL_MATHS.mul_bcde_by_128; BCDE = byte offset of the extent's end
+        ex      de, hl
+        ld      de, (current_esxdos.stats+7); File size, low word
+        or      a
+        sbc     hl, de
+        ld      h, b
+        ld      l, c
+        ld      de, (current_esxdos.stats+9); File size, high word
+        sbc     hl, de
+        jr      c, .keep                    ; The file goes on past this extent
+        ld      a, (BDOS.fcb_cache.rc)
+        ld      (BDOS.fcb_cache.cr), a
+        ld      de, BDOS.fcb_cache
+        call    get_block_num_from_fcb
+        call    KERNEL_MATHS.mul_bcde_by_128; BCDE = byte offset of the end of rc
+        ld      (io_offset), de
+        ld      (io_offset+2), bc
+        ex      de, hl
+        ld      de, (current_esxdos.stats+7)
+        or      a
+        sbc     hl, de
+        ld      h, b
+        ld      l, c
+        ld      de, (current_esxdos.stats+9)
+        sbc     hl, de
+        jr      nc, .keep                   ; rc does not cut the file short
+        ld      de, (io_offset)
+        ld      bc, (io_offset+2)
+        ld      a, (io_handle)
+        m_kr_esxdos F_FTRUNCATE
+        jr      c, .fail
+.keep:
+        pop     af
+        ld      (BDOS.fcb_cache.cr), a
+        or      a                           ; Clear carry
+        ret
+.fail:
+        pop     af
+        ld      (BDOS.fcb_cache.cr), a
+        scf
+        ret
+
+;
 ; Seek the file io_handle to the byte offset BCDE, which is kept in
 ; io_offset; seek_io_offset seeks to io_offset again. esxdos stops a seek at
 ; the end of the file.
@@ -695,7 +760,7 @@ search_first:
         xor     a
         ld      (search.all_users), a       ; Drives C: on have no user folders
 .virtual_drive:
-        ld      a, (BDOS.current_user)
+        ld      a, (current_user)
         ld      b, a
         ld      a, (search.all_users)
         or      a
@@ -1355,6 +1420,12 @@ ro_vector:                      ; Drives set read-only (function 28)
         dw      0
 io_readonly:                    ; Non-zero when handle_open_fcb's handle is read only
         db      0
+current_disk:                   ; Drive selected (function 14), 0=A to 15=P
+        db      0
+current_user:                   ; User number (function 32)
+        db      0
+dma_address:                    ; DMA address (function 26)
+        dw      0
 
 ;
 ;-----------------------------------------------------------------------------
@@ -1430,5 +1501,7 @@ readstr:
         db      0
 .column:                        ; Screen column where the line began
         db      0
+.line:                          ; The line: +0 the count read, +1 on the characters
+        ds      256, 0
 
     ENDMODULE

@@ -60,7 +60,7 @@
 
 ;    DP/M ASSEMBLY *****
 ;    This file is assembled on its own into CCP.COM, an image of the CCP at
-;    CCP_A ($D000). The kernel reads CCP.COM from its install folder at every
+;    CCP_A. The kernel reads CCP.COM from its install folder at every
 ;    cold and warm boot, so another CCP.COM can replace it. Any CCP.COM must
 ;    start with the two jumps at ENTRY: the BIOS enters at CCP_A+3 with the
 ;    drive and user in C, and the file must fit below the BDOS at BDOS_A.
@@ -72,7 +72,6 @@
     INCLUDE "inc/addresses.asm"                 ; CCP_A, TBUFF_A
     INCLUDE "inc/constants.asm"                 ; TRUE, FALSE
     INCLUDE "inc/ascii.asm"                     ; KERNEL_KEYBOARD.CR, LF, ESC
-    INCLUDE "inc/common/debug.asm"              ; m_CSpect_BREAK
 
         ORG    CCP_A        ; START OF CCP IN MEMEORY IN YOUR SYSTEM
         
@@ -331,7 +330,6 @@ READBUF:
         call    OPEN
         jr      z, .read_console                          ; ERASE $$$.SUB IF END OF FILE AND GET CMND
         
-        m_CSpect_BREAK;jr $ ; Handle SUBfile commands from here
         LD    A,(SUBFRC)    ; GET VALUE OF LAST RECORD IN FILE
         DEC    A        ; PT TO NEXT TO LAST RECORD
         LD    (SUBFCR),A    ; SAVE NEW VALUE OF LAST RECORD IN $$$.SUB
@@ -452,7 +450,7 @@ SEARCHDELIM:
         or      a                   ; 0=Delimiter
         ret     z                   ; ...Found
         cp      ' '                 ; Compare to character
-        jp      c, INVALID_COMMAND
+        jr      c, INVALID_COMMAND
         ret     z                   ; ...Found
         cp      '='                 ; Compare to character
         ret     z                   ; ...Found
@@ -494,7 +492,7 @@ ADDAHL:
 ; On output CMDINBUFF_PTR points to character at which to continue parsing,
 ;   z flag set if '?' is in the token.
 PARSECMD:
-        ld      a, 0                ; Start at drive/user spec byte of FCB
+        xor     a                   ; Start at drive/user spec byte of FCB
 .scan1:
         ld      hl, FCB_DN          ; Destination of parsed command
         call    ADDAHL              ; Add A (offset) to HL (fcb) pointer
@@ -504,9 +502,7 @@ PARSECMD:
         ld      hl, (CMDINBUFF_PTR)        ; HL point to next char in commandline
         ex      de, hl              ; Switch char ptr into DE
         call    SBLANK              ; Skip to first non-blank, or EoLine
-        ex      de, hl              ; Swap, HL contains FBC_DN again
-        ld      (CIPTR), hl         ; CIPTR now points to first char, or EoLine
-        ex      de, hl              ; Swap, DE now points to first char, or EoLine
+        ld      (CIPTR), de         ; CIPTR now points to first char, or EoLine
         pop     hl                  ; Restore FCB_DN into HL
         push    hl                  ; and save it again
         ld      a, (de)             ; Get char DE is pointing at?
@@ -879,7 +875,7 @@ CMD_DIR:
         call    SEARF               ; Search & get first entry from directory if found
         call    z, PRINT_NOFILE     ; ...Not found, print a friendly message and restart CCP
 .print_loop:                    ; Print Selection Loop, A=Offset from Search function
-        jp      z, .done            ; If zero flag, we're done printing
+        jr      z, .done            ; If zero flag, we're done printing
         dec     a                   ; Adjust A to actual returned value (SEARF/SEARN special case)
         rrca                        ; Convert number into TBUFF offset
         rrca
@@ -896,7 +892,7 @@ CMD_DIR:
         ld      a, e                ; move E into A
         inc     e                   ; preemtively increment E
         push    de                  ; and save it back
-        cp      $00                 ; Is this the first column?
+        or      a                   ; Is this the first column?
         jr      nz, .check_eol      ; ...Nope? Check if it's last column?
 .linewrap
         call    CRLF                ; ...Yep? Print a new line and prompt
@@ -936,8 +932,6 @@ CMD_DIR:
         jr      .print_next_char    ; And then move along to next character
 .break_check:
         call    BREAK               ; Did User press ESCAPE to abort listing?
-        jr      nz, .break
-.break:
         cp      $03                 ; Was it control C?
         jr      z, .break_notify    ; ...Yes, we're done
         cp      $1b                 ; Was it Escape?
@@ -1164,7 +1158,7 @@ CMD_REN:
         DEFB    REN0-$-1 AND 0FFH; CONTINUE IF NOT FOUND
         CALL    PRINT
         DEFB    'File Exists',0
-        JP    RENRET
+        jr      RENRET
 REN0:    
         LD    HL,FCB_DN   ; SAVE NEW FILE NAME
         LD    DE,FCBDM
@@ -1233,11 +1227,12 @@ CMD_USER:
 
 ; Send VT52 escape sequences to clear screen to terminal driver
 CMD_CLS:    
-        ld      a, 27  : call CONOUT        ; Move cursor home
-        ld      a, 'H' : call CONOUT
-        ld      a, 27  : call CONOUT        ; Clear to end of screen
-        ld      a, 'J' : call CONOUT
+        ld      hl, CLS_STR
+        call    PRINT.string_at_hl
         jp      RESTART_CCP.drive_changed        ; RESTART CCP (NO DEFAULT LOGIN)
+CLS_STR:
+        db      KERNEL_KEYBOARD.ESC, 'H'    ; Move cursor home
+        db      KERNEL_KEYBOARD.ESC, 'J', 0 ; Clear to end of screen
 
 ; End DP/M and return to NextZXOS through DP/M's exit entry in the BIOS jump
 ; table, found from the warm boot address at $0001, as EXIT.COM does
@@ -1327,7 +1322,7 @@ RUN_COM:
 .load_error:
         CALL    PRINT
         DEFB    'Bad Load',0
-        JP      RESTART_CCP
+        jr      RESTART_CCP
 .load_complete:
         pop     hl                  ; Load completed!
         dec     a
@@ -1395,35 +1390,6 @@ RESETUSR:
         LD    E, A        ; PLACE IN E
         JP    SETUSR        ; RESET
 
-
-PRINT_FCB:
-        push    af
-        push    de
-        push    bc
-        ld      a, (de)
-        add     'A'
-        call    CONOUT
-        add     ':'
-        call    CONOUT
-        ld      b, 8
-.print_filename
-        inc     de
-        ld      a, (de)
-        call    CONOUT
-        djnz    .print_filename
-        add     '.'
-        call    CONOUT
-        ld      b, 3
-.print_fileext
-        inc     de
-        ld      a, (de)
-        call    CONOUT
-        djnz    .print_fileext
-
-        pop     bc
-        pop     de
-        pop     af
-        ret
 
 ;
 ; Static string extension for loading transient commands
@@ -1501,8 +1467,6 @@ FCBCR:
 
 PRINT_FLAG:                 ; Printer enabled (0=No, $ff=Yes)
         DEFB    0
-IORESL:                     ; I/O results
-        DEFB    0
 TDRIVE:                     ; Temp drive
         DEFB    1
 TEMP_DR:        
@@ -1531,10 +1495,15 @@ ccp_end:                                   ; after last machine code byte which 
 ; -- Report size, export memory as binary
 ;-----------------------------------------------------------------------------
 ccpBinSz   EQU     ccp_end-ccp_start      ; Shamelessly stolen clever reporting code from .DISPLAYEDGE by Ped7g
-ccpBinPcHi EQU     (100*ccpBinSz)/(256*12)
-ccpBinPcLo EQU     ((100*ccpBinSz)%(256*12))*10/(256*12)
-        DISPLAY "ccp LEN\t:\t",/D,ccpBinSz,"B\t(",/D,ccpBinPcHi,".",/D,ccpBinPcLo,"% of ccp command 3kiB)"
+ccpBinPcHi EQU     (100*ccpBinSz)/(BDOS_A-CCP_A)
+ccpBinPcLo EQU     ((100*ccpBinSz)%(BDOS_A-CCP_A))*10/(BDOS_A-CCP_A)
+        DISPLAY "ccp LEN\t:\t",/D,ccpBinSz,"B\t(",/D,ccpBinPcHi,".",/D,ccpBinPcLo,"% of the space below the BDOS)"
         
         ASSERT  ccp_end <= BDOS_A           ; The kernel reads CCP.COM up to the BDOS
+        ASSERT  CCP.ENTRY == CCP_RUN_A      ; The BIOS enters here at cold boot to run a line
+        ASSERT  CCP.ENTRY+3 == CCP_PROMPT_A ; and here otherwise
+        ASSERT  CCP.CBUFF == CCP_CBUFF_A    ; The kernel writes the line's length here
+        ASSERT  CCP.CIBUFF == CCP_CIBUFF_A  ; and its text here
+        ASSERT  CCP_CMD_MAX < CCP.BUFLEN    ; The line and its 0 fit the buffer
         SAVEBIN "../build/CCP.COM",ccp_start,ccpBinSz
         DISPLAY "======================================================= <"

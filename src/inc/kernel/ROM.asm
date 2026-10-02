@@ -404,7 +404,7 @@ setup:                                   ; DPM starting up - initialise hardware
 ;
 ; Write the page zero jumps: JP to the BIOS warm boot at $0000, JP to the
 ; BDOS at $0005, whose address at $0006 is the top of the TPA.
-;   $C3, $03, $FA,  IOBYTE, user/drive,  $C3, $00, $E0
+;   $C3, BIOS.WBOOTE,  IOBYTE, user/drive,  $C3, BDOS_ENTRY_A
 ; Userland must be paged in at $0000. Dirties A, HL
 page_zero_jumps:
         ld      a, $C3                  ; $C3  == JP instruction
@@ -412,7 +412,7 @@ page_zero_jumps:
         ld      ($0005), a              ; BDOS jump
         ld      hl, BIOS.WBOOTE         ; BIOS warm boot entry point (not jump table)
         ld      ($0001), hl             ; Undocumented instruction! Copy HL to addr.
-        ld      hl, BDOS.entry          ; BDOS entry point
+        ld      hl, BDOS_ENTRY_A        ; BDOS entry point
         ld      (BDOSPTR_A), hl         ; Undocumented instruction! Copy HL to addr.
         ret
 
@@ -694,6 +694,28 @@ ccp_load_error:
         jp      @kernel_error_exit
 
 ;
+; Cold boot: put the command line kept from the dot command's arguments in the
+; CCP's buffer, its length at CCP_CBUFF_A and its text, ending in 0, at
+; CCP_CIBUFF_A, then empty the kept line, so it runs once. With no line the
+; CCP is left as it was loaded. Returns the length in A, 0 if there is no
+; line. Dirties AF, BC, DE, HL
+autocmd_to_ccp:
+        ld      a, (dynamic_data.autocmd)
+        or      a
+        ret     z                           ; No line
+        ld      (CCP_CBUFF_A), a
+        ld      c, a
+        ld      b, 0
+        inc     bc                          ; The text and its 0
+        ld      hl, dynamic_data.autocmd+1
+        ld      de, CCP_CIBUFF_A
+        ldir
+        ld      hl, dynamic_data.autocmd
+        ld      a, (hl)                     ; The length, returned
+        ld      (hl), 0                     ; The kept line is now empty
+        ret
+
+;
 ;-----------------------------------------------------------------------------
 ;-- Kernel entrypoints from BIOS
 ;-----------------------------------------------------------------------------
@@ -711,7 +733,7 @@ BIOS_WBOOT:
         call    KERNEL_BDOS.search_close
         call    page_zero_jumps
         ld      hl, TBUFF_A
-        ld      (BDOS.dma_address), hl
+        ld      (KERNEL_BDOS.dma_address), hl
         ret
         
 ;
@@ -833,6 +855,90 @@ BIOS_EXIT:
 ;-- Kernel entrypoints from BDOS
 ;-----------------------------------------------------------------------------
 
+;
+; Called by BDOS.entry once the kernel is paged in. Jumps to the routine for
+; function C, with C, DE and A = C as the caller had them. A function number
+; past the end of the table returns A=0 and B=0, as the CP/M 2.2 manual gives
+; for a number out of range.
+bdos_dispatch:
+        ld      a, c
+        cp      BDOS_FUNCS
+        jr      nc, .out_of_range
+        push    de
+        ld      hl, bdos_table               ; Base entry in jump table
+        ld      e, c                         ; Function number into DE
+        ld      d, 0                         ;
+        add     hl, de                       ; Add it to HL...
+        add     hl, de                       ; ...twice - to get right (16bit) address
+        ld      e, (hl): inc hl: ld d, (hl)  ; ld de, (hl)
+        ex      de, hl                       ; HL now holds address of the BDOS call
+        pop     de                           ; & DE the parameters for the call
+
+    IF DPM_DEBUG
+            push    af
+            ld      a, l : call KERNEL_DEBUG.tm_a_loc76
+            ld      a, h : call KERNEL_DEBUG.tm_a_loc78
+            pop     af
+    ENDIF
+
+        jp      (hl)
+.out_of_range:
+        xor     a
+        ld      b, a
+        ret
+
+bdos_table:
+        dw BDOS_P_TERMCPM                   ;EQU 0        00
+        dw BDOS_C_READ                      ;EQU 1        01
+        dw BDOS_C_WRITE                     ;EQU 2        02
+        dw BDOS_A_READ                      ;EQU 3        03
+        dw BDOS_A_WRITE                     ;EQU 4        04
+        dw BDOS_L_WRITE                     ;EQU 5        05
+        dw BDOS_C_RAWIO                     ;EQU 6        06
+        dw BDOS_IO_GET                      ;EQU 7        07
+        dw BDOS_IO_SET                      ;EQU 8        08
+        dw BDOS_C_WRITESTR                  ;EQU 9        09
+        dw BDOS_C_READSTR                   ;EQU 10       0A
+        dw BDOS_C_STAT                      ;EQU 11       0B
+        dw BDOS_S_BDOSVER                   ;EQU 12       0C
+        dw BDOS_DRV_ALLRESET                ;EQU 13       0D
+        dw BDOS_DRV_SET                     ;EQU 14       0E
+        dw BDOS_F_OPEN                      ;EQU 15       0F
+        dw BDOS_F_CLOSE                     ;EQU 16       10
+        dw BDOS_F_SFIRST                    ;EQU 17       11
+        dw BDOS_F_SNEXT                     ;EQU 18       12
+        dw BDOS_F_DELETE                    ;EQU 19       13
+        dw BDOS_F_READ                      ;EQU 20       14
+        dw BDOS_F_WRITE                     ;EQU 21       15
+        dw BDOS_F_MAKE                      ;EQU 22       16
+        dw BDOS_F_RENAME                    ;EQU 23       17
+        dw BDOS_DRV_LOGINVEC                ;EQU 24       18
+        dw BDOS_DRV_GET                     ;EQU 25       19
+        dw BDOS_F_DMAOFF                    ;EQU 26       1A
+        dw BDOS_DRV_ALLOCVEC                ;EQU 27       1B
+        dw BDOS_DRV_SETRO                   ;EQU 28       1C
+        dw BDOS_DRV_ROVEC                   ;EQU 29       1D
+        dw BDOS_F_ATTRIB                    ;EQU 30       1E
+        dw BDOS_DRV_DPB                     ;EQU 31       1F
+        dw BDOS_F_USERNUM                   ;EQU 32       20
+        dw BDOS_F_READRAND                  ;EQU 33       21
+        dw BDOS_F_WRITERAND                 ;EQU 34       22
+        dw BDOS_F_SIZE                      ;EQU 35       23
+        dw BDOS_F_RANDREC                   ;EQU 36       24
+        dw BDOS_DRV_RESET                   ;EQU 37       25
+        dw BDOS_38  ; DRV_ACCESS    MP/M    ;
+        dw BDOS_39  ; DRV_FREE      MP/M    ;
+        dw BDOS_F_WRITEZF                   ;EQU 40       28
+        dw BDOS_41  ; Test and write record ;
+        dw BDOS_42  ; F_LOCK        MP/M    ;
+        dw BDOS_43  ; F_UNLOCK      MP/M    ;
+        dw BDOS_44  ; F_MULTISEC    MP/M2   ;
+        dw BDOS_F_ERRMODE                   ; eq 45       2D
+        dw BDOS_46  ; DRV_SPACE     MP/M2   ;
+        dw BDOS_47  ; P_CHAIN       MP/M2   ;
+        dw BDOS_48  ; DRV_FLUSH     MP/M2   ;
+BDOS_FUNCS      EQU     ($-bdos_table)/2
+
 ; Entered with C=0. Does not return.
 BDOS_P_TERMCPM:     ; Function 0
         ; Quit the current program, return to command prompt through the
@@ -917,17 +1023,17 @@ BDOS_IO_SET:        ; Function 8
         jp      ret0_in_a
 
 ; Print the string at DE until we see a "$". The string may be anywhere in
-; userland, so it is copied into con_cache a piece at a time and printed from there.
+; userland, so it is copied into dma_cache a piece at a time and printed from there.
 BDOS_C_WRITESTR:
         ex      de, hl                  ; HL = userland string
 .next_piece:
         push    hl
-        ld      de, BDOS.con_cache      ; Copy the next piece into the cache
-        ld      bc, 128
+        ld      de, BDOS.dma_cache      ; Copy the next piece into the cache
+        ld      bc, BDOS.DMA_CACHE_LEN
         call    BDOS.copy_userland
         pop     hl
-        ld      de, BDOS.con_cache
-        ld      b, 128
+        ld      de, BDOS.dma_cache
+        ld      b, BDOS.DMA_CACHE_LEN
 .next_char:
         ld      a, (de)
         cp      '$'
@@ -938,10 +1044,48 @@ BDOS_C_WRITESTR:
         djnz    .next_char
         jr      .next_piece             ; HL now points at the next piece
 
+;
+; Copy BC bytes, 1 or more, from kernel memory at HL to userland at DE, through
+; dma_cache a piece at a time. Dirties AF, BC, DE, HL
+copy_to_userland:
+        push    bc                      ; Bytes left
+        ld      a, b
+        or      a
+        jr      nz, .full_piece
+        ld      a, c
+        cp      BDOS.DMA_CACHE_LEN+1
+        jr      c, .piece               ; The last piece
+.full_piece:
+        ld      bc, BDOS.DMA_CACHE_LEN
+.piece:                                 ; BC = bytes in this piece
+        push    bc
+        push    de
+        ld      de, BDOS.dma_cache
+        ldir                            ; Into the cache; HL moves on to the next piece
+        pop     de
+        pop     bc
+        push    bc
+        push    hl
+        ld      hl, BDOS.dma_cache
+        call    BDOS.copy_userland      ; Out to userland; DE moves on to the next piece
+        pop     hl
+        pop     bc                      ; Bytes in this piece
+        ex      (sp), hl                ; HL = bytes left, the next piece's address kept
+        or      a
+        sbc     hl, bc
+        ld      b, h
+        ld      c, l
+        pop     hl
+        ld      a, b
+        or      c
+        jr      nz, copy_to_userland
+        ret
+
 ; Read a line of edited console input into the buffer at DE: +0 the maximum
 ; length (mx), +1 the count read (nc), +2 on the characters. The buffer may be
-; anywhere in userland, so the line is built in con_cache and copied out when
-; it ends. Input ends on CR or LF, or when mx characters have been typed.
+; anywhere in userland, so the line is built in readstr.line in the kernel and
+; copied out when it ends. Input ends on CR or LF, or when mx characters have
+; been typed.
 ;   BS, DEL     rub out the last character
 ;   ^X          rub out the whole line, and start again
 ;   ^U          "#", new line, start again
@@ -953,19 +1097,19 @@ BDOS_C_WRITESTR:
 BDOS_C_READSTR:
         ld      (KERNEL_BDOS.readstr.dest), de
         ex      de, hl                  ; HL = userland buffer
-        ld      de, BDOS.con_cache
+        ld      de, BDOS.dma_cache
         ld      bc, 1
         call    BDOS.copy_userland      ; Fetch mx
-        ld      a, (BDOS.con_cache)
+        ld      a, (BDOS.dma_cache)
         ld      (KERNEL_BDOS.readstr.max), a
         ld      a, (KERNEL_TERM.state.console_column)
         ld      (KERNEL_BDOS.readstr.column), a ; Column where the line began
 .restart:
         xor     a
-        ld      (BDOS.con_cache), a     ; No characters yet
+        ld      (KERNEL_BDOS.readstr.line), a ; No characters yet
 .read_to_buffer:
         ld      a, (KERNEL_BDOS.readstr.max)
-        ld      hl, BDOS.con_cache
+        ld      hl, KERNEL_BDOS.readstr.line
         cp      (hl)                    ; Buffer full?
         jr      z, .done                ; ...Yes, the line ends
         call    BIOS_CONIN              ; Wait for a key
@@ -991,7 +1135,7 @@ BDOS_C_READSTR:
         cp      32
         jp      c, .read_to_buffer      ; Other control characters are ignored
 
-        ld      hl, BDOS.con_cache
+        ld      hl, KERNEL_BDOS.readstr.line
         inc     (hl)                    ; Increase the final-chars-count
         ld      e, (hl)
         ld      d, 0
@@ -1003,19 +1147,19 @@ BDOS_C_READSTR:
 .done:
         ld      a, KERNEL_KEYBOARD.CR
         call    KERNEL_TERM.process     ; Return the carriage, as CP/M does
-        ld      hl, BDOS.con_cache      ; Copy nc and the characters out
+        ld      hl, KERNEL_BDOS.readstr.line ; Copy nc and the characters out
         ld      c, (hl)
         ld      b, 0
         inc     bc
         ld      de, (KERNEL_BDOS.readstr.dest)
         inc     de
-        call    BDOS.copy_userland
-        ld      a, (BDOS.con_cache)
+        call    copy_to_userland
+        ld      a, (KERNEL_BDOS.readstr.line)
         ld      b, 0
         ret
 
 .reboot_if_start_of_line:
-        ld      a, (BDOS.con_cache)
+        ld      a, (KERNEL_BDOS.readstr.line)
         or      a
         jp      nz, .read_to_buffer     ; ^C later in a line is ignored
         ld      a, '^'
@@ -1025,7 +1169,7 @@ BDOS_C_READSTR:
         jp      $0000                   ; Warm boot
 
 .backspace:
-        ld      hl, BDOS.con_cache
+        ld      hl, KERNEL_BDOS.readstr.line
         ld      a, (hl)                 ; If final-chars is zero we can't go back any more
         or      a
         jp      z, .read_to_buffer
@@ -1034,7 +1178,7 @@ BDOS_C_READSTR:
         jp      .read_to_buffer
 
 .erase_line:
-        ld      a, (BDOS.con_cache)
+        ld      a, (KERNEL_BDOS.readstr.line)
         or      a
         jp      z, .restart
         ld      b, a
@@ -1049,7 +1193,7 @@ BDOS_C_READSTR:
 
 .retype:
         call    .hash_newline
-        ld      hl, BDOS.con_cache
+        ld      hl, KERNEL_BDOS.readstr.line
         ld      a, (hl)
         or      a
         jp      z, .read_to_buffer
@@ -1120,7 +1264,7 @@ BDOS_DRV_ALLRESET:
         call    BDOS_DRV_SET                           ; Choose disk A:
 
         ld      hl, $0080
-        ld      (BDOS.dma_address), hl                 ; Set standard DMA location
+        ld      (KERNEL_BDOS.dma_address), hl                 ; Set standard DMA location
         
         jp      ret0_in_a
 
@@ -1152,7 +1296,7 @@ BDOS_DRV_SET:
 .virtual_drive:                                 ; Handle ESXDOS folder-as-a-drive, a is 0 or 1
         pop     de : push de                        ; restore E
         ld      b, e                                ; Disk is in E, copy to B.   0 = A:, 15 = P:
-        ld      a, (BDOS.current_user)
+        ld      a, (KERNEL_BDOS.current_user)
         ld      c, a                                ; User number copied to C.   0 thru 15
         ld      hl, KERNEL_BDOS.current_esxdos.filepath; Destination pointer for path in HL
         call    KERNEL_BDOS.drive_and_user_to_path
@@ -1160,7 +1304,7 @@ BDOS_DRV_SET:
 .done:
         pop     de
         ld      a, e
-        ld      (BDOS.current_disk), a              ; Store disk
+        ld      (KERNEL_BDOS.current_disk), a              ; Store disk
         call    KERNEL_BDOS.set_login_drive
         
         xor     a                                   ; Wipe A
@@ -1174,12 +1318,12 @@ BDOS_DRV_SET:
 ; CCP does not select the missing drive again when it restarts.
 .error:
         pop     de
-        ld      a, (BDOS.current_user)
+        ld      a, (KERNEL_BDOS.current_user)
         add     a, a
         add     a, a
         add     a, a
         add     a, a                                ; User in the high nibble...
-        ld      hl, BDOS.current_disk
+        ld      hl, KERNEL_BDOS.current_disk
         or      (hl)                                ; ...disk in the low
         ld      (USERDRIVE_A), a
         ld      a, e
@@ -1209,8 +1353,10 @@ BDOS_F_OPEN:
         
 ;
 ; Close the file the FCB names: its table handle, if it has one, is synced to
-; the card and closed. Returns 0, or 255 if the file does not exist or the
-; sync fails.
+; the card and closed. With s2's bit 7 (file unmodified) clear, a file in the
+; table is first shortened to the FCB's rc when rc cuts its last extent short
+; (KERNEL_BDOS.truncate_to_rc). Returns 0, or 255 if the file does not exist,
+; or the shortening or the sync fails.
 BDOS_F_CLOSE:
         call    BDOS.cache_calling_fcb              ; Userland call, cache FCB for use in kernel
         call    KERNEL_BDOS.handle_make_key
@@ -1218,6 +1364,14 @@ BDOS_F_CLOSE:
         call    KERNEL_BDOS.handle_find             ; HL = slot, Z if the file is open
         pop     de
         jp      nz, .not_open
+        ld      a, (BDOS.fcb_cache.s2)
+        rla                                         ; Carry = bit 7, file unmodified
+        jr      c, .sync
+        push    hl
+        call    KERNEL_BDOS.truncate_to_rc
+        pop     hl
+        jp      c, ret255_in_a
+.sync:
         push    hl
         inc     hl
         ld      a, (hl)                             ; HANDLE.esx
@@ -1417,7 +1571,7 @@ BDOS_F_RENAME:
         ld      a, (de)                             ; Source drive, 0 = current disk
         or      a
         jr      nz, .source_drive
-        ld      a, (BDOS.current_disk)              ; Current disk is indexed from 0...
+        ld      a, (KERNEL_BDOS.current_disk)              ; Current disk is indexed from 0...
         inc     a                                   ; ...so adjust it to match the FCB
         ld      (de), a
 .source_drive:
@@ -1482,7 +1636,7 @@ BDOS_DRV_LOGINVEC:                                                              
 
 ; Get the currently selected drive number, return it in A, reset B to zero at same time
 BDOS_DRV_GET:                                                                   ;EQU 25       $19
-        ld      a, (BDOS.current_disk)
+        ld      a, (KERNEL_BDOS.current_disk)
         and     %00001111                       ; Make sure it is 0-15
         ld      b, 0
         ret
@@ -1490,7 +1644,7 @@ BDOS_DRV_GET:                                                                   
 ; Set's a new DMA address (passed in DE) to the pointer address in the BDOS RAM
 BDOS_F_DMAOFF:                                                                  ;EQU 26       $1A
         ; Pass in de -> DMA Address
-        ld (BDOS.dma_address), de
+        ld (KERNEL_BDOS.dma_address), de
         jp ret0_in_a
 
 ;
@@ -1508,7 +1662,7 @@ BDOS_DRV_ALLOCVEC:                                                              
 ; which the CCP runs at every warm boot). Writes to it then give the R/O
 ; error.
 BDOS_DRV_SETRO:                                                                 ;EQU 28       $1C
-        ld      a, (BDOS.current_disk)
+        ld      a, (KERNEL_BDOS.current_disk)
         call    KERNEL_BDOS.drive_bit
         ld      de, (KERNEL_BDOS.ro_vector)
         ld      a, l
@@ -1593,14 +1747,14 @@ BDOS_F_USERNUM:                   ;EQU 32       $20
         jr      z, .get
 .set:
         and     %00001111                           ; Make sure it is 0-15
-        ld      (BDOS.current_user), a      ; Store new value
-        ld      a, (BDOS.current_disk)
+        ld      (KERNEL_BDOS.current_user), a      ; Store new value
+        ld      a, (KERNEL_BDOS.current_disk)
         ld      e, a
         
         call    BDOS_DRV_SET                ; Change to the appropriate folder, or real drive
         ret
 .get:
-        ld a, (BDOS.current_user)
+        ld a, (KERNEL_BDOS.current_user)
             ; call KERNEL_DEBUG.tm_a_loc0
         ld b, 0
         ret

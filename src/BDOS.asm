@@ -14,50 +14,25 @@ bdos_start:
     DISPLAY "BDOS ORG\t:\t",/H,$
 
     MODULE  BDOS
+; Six bytes where CP/M 2.2 keeps its serial number, so the entry is at
+; BDOS_A+6 as in CP/M 2.2. A program may use them: they hold nothing.
+serial:
+        ds      6, 0
+
 entry:
         ; The function number is passed in Register C.
         ; The parameter is passed in DE.
         ; Result returned in A or HL. Also, A=L and B=H on return for compatibility reasons.
-        ; A function number past the end of the table returns A=L=0, B=H=0,
-        ; as the CP/M 2.2 manual gives for a number out of range.
-
-        ld      a, c                    ; copy parameter from C to A
-        cp      49
-        jr      c, .exec_func
-        xor     a
-        ld      b, a
-        ld      h, a
-        ld      l, a
-        ret
-
-.exec_func:
+        ; KERNEL.bdos_dispatch finds the function and handles a number out of range.
         ld      (.exit_stack), sp            ; Keep the caller's stack pointer, for the way out
         ld      sp, BIOS.stack
-
-        push    de
-        ld      hl, kernel_jump_table        ; Base entry in jump table
-        ld      e, c                         ; Function number into DE
-        ld      d, 0                         ;
-        add     hl, de                       ; Add it to HL...
-        add     hl, de                       ; ...twice - to get right (16bit) address
-
-        ld      e, (hl): inc hl: ld d, (hl)  ; ld de, (hl)
-        ex      de, hl                       ; HL now holds address of the BDOS call
-        ld      (.SMC_kernel_func), hl
-        pop     de                           ; & DE the parameters for the call
 
 .SMC_MMU4_kernel EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_kernel EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
 
-    IF DPM_DEBUG
-            ld      a, l : call KERNEL_DEBUG.tm_a_loc76
-            ld      a, h : call KERNEL_DEBUG.tm_a_loc78
-    ENDIF
-
-.SMC_kernel_func EQU $+1
-        call    0xAAAA                       ; Kernel routine to call, 0xAAAA is SMC.
+        call    KERNEL.bdos_dispatch         ; Function C, parameter DE
 
 .SMC_MMU4_userland EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
@@ -73,6 +48,7 @@ entry:
 
 .exit_stack:
         dw      0
+        ASSERT  entry == BDOS_ENTRY_A
 
 
 ; Copy FCB (pointed to by DE) to cache in BDOS
@@ -139,13 +115,13 @@ copy_dma_out_kernel:
         push    af
         push    de
         push    bc
-        ;; Ensure that all the userland memory is available, incase HL resides behind kernel
+        ld      de, (KERNEL_BDOS.dma_address) ; Copy To, read while the kernel is paged in
+        ;; Ensure that all the userland memory is available, incase DE resides behind kernel
 .SMC_MMU4_userland EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_userland EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
         ld      hl, dma_cache               ; Copy From
-        ld      de, (BDOS.dma_address)      ; Copy To
         ld      bc, 128                     ; Length of Copy
         ldir                                ; ldi repeat. Go.
         ;; Restore kernel
@@ -158,16 +134,16 @@ copy_dma_out_kernel:
         pop     af
         ret
 
-; Copy DMA cache to DMA address
+; Copy DMA address to DMA cache
 copy_dma_in_kernel:
         push    de
         push    bc
+        ld      hl, (KERNEL_BDOS.dma_address) ; Copy From, read while the kernel is paged in
         ;; Ensure that all the userland memory is available, incase HL resides behind kernel
 .SMC_MMU4_userland EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_userland EQU $+3:
         nextreg	MMU5_A000_NR_55, 0xAA
-        ld      hl, (BDOS.dma_address)      ; Copy From
         ld      de, dma_cache               ; Copy To
         ld      bc, 128                     ; Length of Copy
         ldir                                ; ldi repeat. Go.
@@ -201,15 +177,6 @@ copy_userland:
         pop     af
         ret
 
-filesize_buffer:
-        ds 6
-
-filesize_buffer_copy:
-        ds 6
-
-filesize_units:
-        ds 1
-
 
 ;-----------------------------------------------------------------------------
 ; Caches ensure we have somewhere to R/W when kernel+ROM pagedin
@@ -242,14 +209,12 @@ fcb_cache:
         db      0           ; ...high byte
         
 
+; One CP/M record. Records read and written, directory entries, and console
+; strings and lines (functions 9 and 10) pass through it.
+DMA_CACHE_LEN   EQU     $80
 dma_cache:
 
-        ds  $80, $00
-        
-; Console strings (function 9) and edited lines (function 10) are staged here:
-; for function 10, +0 is the count read and +1 on the characters.
-con_cache:
-        ds  $100, $00
+        ds  DMA_CACHE_LEN, $00
 
 
 ; Disk parameter block for every drive (function 31), RunCPM's values: an
@@ -273,71 +238,6 @@ dpblk:
 diskalloc:
         db      $FF
         ds      DPB_DSM/8, 0
-
-dma_address:
-        ds 2
-
-current_disk:
-        db 0
-current_user:
-        db 0
-        
-temp_fcb:
-        ds 36
-
-greeting:
-        DB "Fake BDOS Banner", 0
-
-kernel_jump_table:
-        dw KERNEL.BDOS_P_TERMCPM                   ;EQU 0        00
-        dw KERNEL.BDOS_C_READ                      ;EQU 1        01
-        dw KERNEL.BDOS_C_WRITE                     ;EQU 2        02
-        dw KERNEL.BDOS_A_READ                      ;EQU 3        03
-        dw KERNEL.BDOS_A_WRITE                     ;EQU 4        04
-        dw KERNEL.BDOS_L_WRITE                     ;EQU 5        05
-        dw KERNEL.BDOS_C_RAWIO                     ;EQU 6        06
-        dw KERNEL.BDOS_IO_GET                      ;EQU 7        07
-        dw KERNEL.BDOS_IO_SET                      ;EQU 8        08
-        dw KERNEL.BDOS_C_WRITESTR                  ;EQU 9        09
-        dw KERNEL.BDOS_C_READSTR                   ;EQU 10       0A
-        dw KERNEL.BDOS_C_STAT                      ;EQU 11       0B
-        dw KERNEL.BDOS_S_BDOSVER                   ;EQU 12       0C
-        dw KERNEL.BDOS_DRV_ALLRESET                ;EQU 13       0D
-        dw KERNEL.BDOS_DRV_SET                     ;EQU 14       0E
-        dw KERNEL.BDOS_F_OPEN                      ;EQU 15       0F
-        dw KERNEL.BDOS_F_CLOSE                     ;EQU 16       10
-        dw KERNEL.BDOS_F_SFIRST                    ;EQU 17       11
-        dw KERNEL.BDOS_F_SNEXT                     ;EQU 18       12
-        dw KERNEL.BDOS_F_DELETE                    ;EQU 19       13
-        dw KERNEL.BDOS_F_READ                      ;EQU 20       14
-        dw KERNEL.BDOS_F_WRITE                     ;EQU 21       15
-        dw KERNEL.BDOS_F_MAKE                      ;EQU 22       16
-        dw KERNEL.BDOS_F_RENAME                    ;EQU 23       17
-        dw KERNEL.BDOS_DRV_LOGINVEC                ;EQU 24       18
-        dw KERNEL.BDOS_DRV_GET                     ;EQU 25       19
-        dw KERNEL.BDOS_F_DMAOFF                    ;EQU 26       1A
-        dw KERNEL.BDOS_DRV_ALLOCVEC                ;EQU 27       1B
-        dw KERNEL.BDOS_DRV_SETRO                   ;EQU 28       1C
-        dw KERNEL.BDOS_DRV_ROVEC                   ;EQU 29       1D
-        dw KERNEL.BDOS_F_ATTRIB                    ;EQU 30       1E
-        dw KERNEL.BDOS_DRV_DPB                     ;EQU 31       1F
-        dw KERNEL.BDOS_F_USERNUM                   ;EQU 32       20
-        dw KERNEL.BDOS_F_READRAND                  ;EQU 33       21
-        dw KERNEL.BDOS_F_WRITERAND                 ;EQU 34       22
-        dw KERNEL.BDOS_F_SIZE                      ;EQU 35       23
-        dw KERNEL.BDOS_F_RANDREC                   ;EQU 36       24
-        dw KERNEL.BDOS_DRV_RESET                   ;EQU 37       25
-        dw KERNEL.BDOS_38  ; DRV_ACCESS    MP/M    ;
-        dw KERNEL.BDOS_39  ; DRV_FREE      MP/M    ;
-        dw KERNEL.BDOS_F_WRITEZF                   ;EQU 40       28
-        dw KERNEL.BDOS_41  ; Test and write record ;
-        dw KERNEL.BDOS_42  ; F_LOCK        MP/M    ;
-        dw KERNEL.BDOS_43  ; F_UNLOCK      MP/M    ;
-        dw KERNEL.BDOS_44  ; F_MULTISEC    MP/M2   ;
-        dw KERNEL.BDOS_F_ERRMODE                   ; eq 45       2D
-        dw KERNEL.BDOS_46  ; DRV_SPACE     MP/M2   ;
-        dw KERNEL.BDOS_47  ; P_CHAIN       MP/M2   ;
-        dw KERNEL.BDOS_48  ; DRV_FLUSH     MP/M2   ;
     ENDMODULE
     
     DISPLAY "BDOS END\t:\t",/H,$
@@ -345,11 +245,12 @@ bdos_end:
 ;-----------------------------------------------------------------------------
 ; -- Report size, export memory as binary
 ;-----------------------------------------------------------------------------
-bdosBinPcHi     EQU     (100*bdosBinSz)/(256*14)
+bdosBinPcHi     EQU     (100*bdosBinSz)/(BIOS_A-BDOS_A)
 bdosBinSz       EQU     bdos_end-bdos_start
 
-bdosBinPcLo     EQU     ((100*bdosBinSz)%(256*14))*10/(256*14)
-    DISPLAY "BDOS LEN\t:\t",/D,bdosBinSz,"B\t(",/D,bdosBinPcHi,".",/D,bdosBinPcLo,"% of 3.5kiB)"
+bdosBinPcLo     EQU     ((100*bdosBinSz)%(BIOS_A-BDOS_A))*10/(BIOS_A-BDOS_A)
+    DISPLAY "BDOS LEN\t:\t",/D,bdosBinSz,"B\t(",/D,bdosBinPcHi,".",/D,bdosBinPcLo,"% of the space below the BIOS)"
+    ASSERT  bdos_end <= BIOS_A                  ; The BDOS ends below the BIOS
     
     SAVEBIN "../build/BDOS",bdos_start,bdosBinSz
     DISPLAY "======================================================= <"

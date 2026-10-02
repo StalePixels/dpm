@@ -42,6 +42,7 @@ dot_start:
 init:
         di                                  ; Disable interrupts for safe paging
         ld      (state.argsPtr),hl          ; preserve pointer to arguments
+        call    save_args                   ; Keep them while BASIC's memory is still paged in
         m_PrintMsg DotMsg.Startup           ; Display our own startup message
 
         ; ld      hl, DotMsg.Startup
@@ -174,14 +175,6 @@ allocate_memory:                        ; Last 16k, 96k total - save the bank nu
         ld      (mem_exit.SMC_mmu7), a
         nextreg	MMU7_E000_NR_57, a          ; Page in Userland7 (0xE000, to load BIOS+BDOS)
         
-        ;; Handle params from dot, CPM binary and lineargs to inject.
-                                            ; ::TODO:: 
-                                            ;   Decide where to store commandline
-                                            ;   I think:
-                                            ;       1) Here, copy it in dotram 
-                                            ;       2) In Kernel, copy out of dotRAM into keybuffer
-                                            ;           (basically, fake it like a $$$.SUB file)
-
         ;; We've finished using NextZXOS, move stack 
         ld      (exit_kernel.SMC_dotstack), sp  ; Stash the stack pointer for return from kernel.
         
@@ -213,7 +206,12 @@ allocate_memory:                        ; Last 16k, 96k total - save the bank nu
         ;; Copy our state object into the kernel, so we can use it when DivMMC RAM is paged out
         ld      hl, @state
         ld      de, KERNEL.dynamic_data.state
-        ld      bc, STATE_SIZE-1;                  ; Length of Copy
+        ld      bc, STATE_SIZE                  ; Length of Copy
+        ldir
+        ;; Copy the command line from the arguments into the kernel, for the CCP at cold boot
+        ld      hl, autocmd
+        ld      de, KERNEL.dynamic_data.autocmd
+        ld      bc, AUTOCMD_SIZE
         ldir
         ;; Call "bootrom" entrypoint (copy fonts, setup tilemap, etc. start emulator, etc)
         call    KERNEL.setup
@@ -400,6 +398,58 @@ ei_exit:
         ei                                  ; Finally enable interrupts for BASIC, now memmap restored
         ret                                 ; and finally exit gracefully
 
+;-----------------------------------------------------------------------------
+; -- Keep the dot command's arguments in autocmd as a CCP command line: the
+;    length, then the text in upper case, ending in 0. Leading spaces are
+;    skipped. The arguments end at $00, $0D or ':'. When they start with '"',
+;    the line is the text up to the next '"', or to $00 or $0D, without the
+;    quotes, and ':' is part of it. At most CCP_CMD_MAX characters are kept.
+;    HL = the arguments, 0 if there are none. Dirties AF, BC, DE, HL
+;-----------------------------------------------------------------------------
+save_args:
+        ld      de, autocmd+1               ; The text
+        ld      b, CCP_CMD_MAX              ; Room left
+        ld      c, ':'                      ; The character that ends the line
+        ld      a, h
+        or      l
+        jr      z, .end                     ; No arguments
+.skip:
+        ld      a, (hl)
+        cp      ' '
+        jr      nz, .first
+        inc     hl
+        jr      .skip
+.first:
+        cp      '"'
+        jr      nz, .next
+        ld      c, a                        ; Quoted: only the closing '"' ends the line
+        inc     hl
+.next:
+        ld      a, (hl)
+        or      a
+        jr      z, .end
+        cp      KERNEL_KEYBOARD.CR
+        jr      z, .end
+        cp      c
+        jr      z, .end
+        cp      'a'
+        jr      c, .keep
+        cp      'z'+1
+        jr      nc, .keep
+        and     %11011111                   ; Fold lower case to upper
+.keep:
+        ld      (de), a
+        inc     de
+        inc     hl
+        djnz    .next
+.end:
+        xor     a
+        ld      (de), a                     ; The 0 after the text
+        ld      a, CCP_CMD_MAX
+        sub     b                           ; Characters kept
+        ld      (autocmd), a
+        ret
+
     ;; Include handy/generic utility procedures - all functions starting with putil_
     INCLUDE "inc/putils.asm"
     
@@ -413,6 +463,9 @@ strings:
 start_state:
 state:      S_STATE
 end_state:
+
+autocmd:                                ; Command line from the arguments: length, text, 0
+    DS  AUTOCMD_SIZE, $00
 
 command_buffer:
     DS  262, $AA                            ; 128bytes of stack set to $AA for to aide debugging

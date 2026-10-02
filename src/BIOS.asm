@@ -98,23 +98,30 @@ reentry_BOOTROOM:
         ld      sp, BIOS.stack
         call    KERNEL.BIOS_WBOOT
         ld      a, (USERDRIVE_A)        ; User in the high nibble, drive in the low
+        ld      hl, CCP_PROMPT_A        ; Past the first jump: the CCP shows its prompt
         jr      entry_BOOTROM.start_ccp
 
-; Cold boot: the CCP starts on drive A, user 0
+; Cold boot: the CCP starts on drive A, user 0, and runs the command line from
+; the dot command's arguments if there is one
 entry_BOOTROM:
         ld      sp, BIOS.stack
         call    KERNEL.BOOTROM
+        call    KERNEL.autocmd_to_ccp   ; A = length of the line put in the CCP's buffer
+        ld      hl, CCP_PROMPT_A        ; No line: the CCP shows its prompt
+        or      a
+        jr      z, .user_drive
+        ld      hl, CCP_RUN_A           ; A line: the first jump runs it
+.user_drive:
         xor     a                       ; Set the drive and user to 0
         ld      (USERDRIVE_A), a        ; Store them in base memory
 
-.start_ccp:
+.start_ccp:                             ; HL = the CCP entry
 .SMC_MMU4_userland EQU $+3
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_userland EQU $+3
         nextreg	MMU5_A000_NR_55, 0xAA
 
         ld      c, a                    ; The CCP takes the drive and user in C
-        ld      hl, CCP_A+3             ;CCP_A+3 moves us past the first jump instruction
         jp      hl
         
 entry_BOOT:                         ;-3: Cold start routine
@@ -190,6 +197,7 @@ biosBinSz   EQU     bios_end-bios_start      ; Shamelessly stolen clever reporti
 
 biosBinPcLo  EQU     ((100*biosBinSz)%(256*2))*10/(256*2)
     DISPLAY "BIOS LEN\t:\t",/D,biosBinSz,"B\t(",/D,biosBinPcHi,".",/D,biosBinPcLo,"% of 0.5kiB)"
+    ASSERT  bios_end <= $10000                  ; The BIOS ends at the top of memory
     
     SAVEBIN "../build/BIOS",bios_start,biosBinSz
     DISPLAY "======================================================= <"
