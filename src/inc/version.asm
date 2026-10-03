@@ -8,6 +8,6 @@
 ;
 ;-----------------------------------------------------------------------------
 
-    DEFINE DPMversion "0.0.1"
+    DEFINE DPMversion "1.0.0"
     DEFINE DPMname "DPM"
-    DEFINE DPMyear "2024"
+    DEFINE DPMyear "2024-2026"
