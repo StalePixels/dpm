@@ -10,6 +10,7 @@ HDIUTIL:=hdiutil
 MAME:=mame
 SEQ:=seq
 TXT2BAS:=txt2bas
+ZIP:=zip
 
 # --- Emulator image: NextZXOS SD card. Its FAT volume is labelled "DPM",
 #     so it always mounts at /Volumes/DPM (see `install_emu`).
@@ -24,6 +25,13 @@ EMU_PATH=$(MOUNT)/DPM
 # Boots DP/M: issues OUT 12091,0 (revert nextfaststart overclock) then runs .dpm.
 AUTOEXEC_SRC:=dev/autoexec.bas.txt
 AUTOEXEC_DST:=$(MOUNT)/nextzxos/autoexec.bas
+# The programs on drive A, user 0: cpmish's .COM files, built by the cpmish
+# submodule and committed here. Their licences go to /DPM/docs/licences.
+DRIVE_A0:=drive/A/0
+DRIVE_DOCS:=drive/docs
+# The release ZIP, named from DPMversion in src/inc/version.asm. Not committed.
+VERSION:=$(shell sed -n 's/.*DEFINE DPMversion "\(.*\)".*/\1/p' src/inc/version.asm)
+RELEASE_ZIP:=build/dpm-$(VERSION).zip
 
 # --- MAME: ZX Spectrum Next driver + Next debugging plugins.
 #     nextbreak    traps the $FD $00 opcode emitted by m_CSpect_BREAK, so the
@@ -40,7 +48,7 @@ MAME_RUN:=$(MAME) $(MAME_SYS) -hard1 $(IMAGE) \
 		-window -nomaximize -resolution 1024x768 -nothrottle \
 		-debug -plugin nextbreak,debugstart,nextfaststart
 
-.PHONY: dev emulate turbo dot ccp exit install_emu autoexec mount_image unmount_image \
+.PHONY: dev emulate turbo dot ccp exit cpmish release install_emu autoexec mount_image unmount_image \
         cspect cspect_turbo setup_emulator setup_emulator_testfiles \
         _setup_dirs _setup_files
 
@@ -71,14 +79,39 @@ dot:
 ccp:
 	cd src && $(SJASMPLUS) CCP.asm
 
-# EXIT.COM, the CP/M program that ends DP/M. install_emu puts it on drive A,
-# user 0.
+# EXIT.COM, the CP/M program that ends DP/M, built into DRIVE_A0 with the
+# other drive A, user 0 programs.
 exit:
 	cd src && $(SJASMPLUS) EXIT.asm
+	$(CP) build/EXIT.COM $(DRIVE_A0)/EXIT.COM
 
-# Mount the image, copy the freshly built dot, CCP.COM and EXIT.COM in, then unmount so
-# the image is free for MAME (macOS and MAME must not hold the FAT volume at
-# once).
+# Rebuild cpmish's programs (dev/cpmish/build.sh, in Docker) into a temporary
+# folder, then replace the .COM files in DRIVE_A0 with them, names upper-cased
+# as on a CP/M disk.
+cpmish:
+	tmp=$$(mktemp -d) && dev/cpmish/build.sh cpmish $$tmp && \
+	for f in $$tmp/*.com; do \
+		$(CP) $$f $(DRIVE_A0)/$$(basename $$f .com | tr a-z A-Z).COM; \
+	done && \
+	rm -rf $$tmp
+
+# The release ZIP, extracted by the user into C:/DPM/: the dot command DPM,
+# CCP.COM, the empty drive folders A/0..15 and B/0..15 (stored as folder
+# entries, so they exist after extraction), the DRIVE_A0 programs in A/0, and
+# the licences in docs/. Nothing else.
+release: dot ccp exit
+	rm -f $(RELEASE_ZIP)
+	tmp=$$(mktemp -d) && \
+	$(CP) build/DPM build/CCP.COM $$tmp/ && \
+	for d in A B; do for u in $$($(SEQ) 0 15); do $(MKDIR) $$tmp/$$d/$$u; done; done && \
+	$(CP) $(DRIVE_A0)/*.COM $$tmp/A/0/ && \
+	$(CP) -R $(DRIVE_DOCS) $$tmp/docs && \
+	(cd $$tmp && $(ZIP) -r -X $(CURDIR)/$(RELEASE_ZIP) DPM CCP.COM A B docs) && \
+	rm -rf $$tmp
+
+# Mount the image, copy the freshly built dot, CCP.COM, the DRIVE_A0
+# programs and the licences in, then unmount so the image is free for MAME (macOS and
+# MAME must not hold the FAT volume at once).
 install_emu:
 	@$(HDIUTIL) detach $(MOUNT) >/dev/null 2>&1 || true
 	$(HDIUTIL) attach -nobrowse -imagekey diskimage-class=CRawDiskImage $(IMAGE)
@@ -86,7 +119,9 @@ install_emu:
 	$(MKDIR) $(EMU_PATH)
 	$(CP) build/CCP.COM $(EMU_PATH)/CCP.COM
 	$(MKDIR) $(EMU_PATH)/A/0
-	$(CP) build/EXIT.COM $(EMU_PATH)/A/0/EXIT.COM
+	$(CP) $(DRIVE_A0)/*.COM $(EMU_PATH)/A/0/
+	$(MKDIR) $(EMU_PATH)/docs
+	$(CP) -R $(DRIVE_DOCS)/licences $(EMU_PATH)/docs/
 	$(HDIUTIL) detach $(MOUNT)
 
 # Tokenise dev/autoexec.bas.txt and install it onto the image as the boot

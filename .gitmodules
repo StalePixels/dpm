@@ -1,0 +1,4 @@
+[submodule "cpmish"]
+	path = cpmish
+	url = git@github.com:StalePixels/cpmish.git
+	branch = DPM
