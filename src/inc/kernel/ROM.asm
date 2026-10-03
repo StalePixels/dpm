@@ -101,6 +101,8 @@ setup:                                   ; DPM starting up - initialise hardware
         push    hl                      ; Stack now: RETADDR, A ptr
         ld      (hl), 'A'
         inc     hl
+        ld      (hl), 0                         ; Null terminate the drive folder's path
+        call    .ensure_folder                  ; Open it, or make it if it is missing
         ld      (hl), '/'
         inc     hl 
         push    hl                      ; Keep EoString safe, we'll want it again later
@@ -117,12 +119,8 @@ setup:                                   ; DPM starting up - initialise hardware
         
         m_PrintCharInA             ; Print Next drive letter
         
-        ld      hl, dynamic_data.working_path       ; Point to start of path
-        ld      a, '*'                              ; This doesn't matter, pathspec overrides it
-        m_esxdos F_OPENDIR                          ; Call ESXDOS without any wrappers (ROM already mapped)
-        jp      c, .config_error
-        ;; Path found, move to next usernumber, stop when we reach 9
-        m_esxdos F_CLOSE                            ; Call ESXDOS without any wrappers (ROM already mapped)
+        call    .ensure_folder                      ; Open the folder, or make it if it is missing
+        ;; Folder found, move to next usernumber, stop when we reach 9
         pop     af                                  ; Get the user number ASCII back
         cp      '9'
         jr      z, .a_tenplus_usernumber
@@ -145,12 +143,8 @@ setup:                                   ; DPM starting up - initialise hardware
         add     a, $11
         m_PrintCharInA             ; Print Next drive letter
         
-        ld      hl, dynamic_data.working_path       ; Point to start of path
-        ld      a, '*'                              ; This doesn't matter, pathspec overrides it
-        m_esxdos F_OPENDIR                          ; Call ESXDOS without any wrappers (ROM already mapped)
-        jr      c, .config_error
-        ;; Path found, move to next usernumber, stop when we reach 9
-        m_esxdos F_CLOSE                            ; Call ESXDOS without any wrappers (ROM already mapped)
+        call    .ensure_folder                      ; Open the folder, or make it if it is missing
+        ;; Folder found, move to next usernumber, stop when we reach 9
         pop     af                                  ; Get the user number ASCII back
         cp      '5'
         jr      z, .a_done
@@ -166,6 +160,8 @@ setup:                                   ; DPM starting up - initialise hardware
         ;; Build the path for virtual B drives
         ld      (hl), 'B'
         inc     hl
+        ld      (hl), 0                         ; Null terminate the drive folder's path
+        call    .ensure_folder                  ; Open it, or make it if it is missing
         ld      (hl), '/'
         inc     hl 
         push    hl                      ; Keep EoString safe, we'll want it again later
@@ -183,12 +179,8 @@ setup:                                   ; DPM starting up - initialise hardware
         
         m_PrintCharInA             ; Print Next drive letter
         
-        ld      hl, dynamic_data.working_path       ; Point to start of path
-        ld      a, '*'                              ; This doesn't matter, pathspec overrides it
-        m_esxdos F_OPENDIR                          ; Call ESXDOS without any wrappers (ROM already mapped)
-        jr      c, .config_error
-        ;; Path found, move to next usernumber, stop when we reach 9
-        m_esxdos F_CLOSE                            ; Call ESXDOS without any wrappers (ROM already mapped)
+        call    .ensure_folder                      ; Open the folder, or make it if it is missing
+        ;; Folder found, move to next usernumber, stop when we reach 9
         pop     af                                  ; Get the user number ASCII back
         cp      '9'
         jr      z, .b_tenplus_usernumber
@@ -211,12 +203,8 @@ setup:                                   ; DPM starting up - initialise hardware
         add     a, $11
         m_PrintCharInA             ; Print Next drive letter
         
-        ld      hl, dynamic_data.working_path       ; Point to start of path
-        ld      a, '*'                              ; This doesn't matter, pathspec overrides it
-        m_esxdos F_OPENDIR                          ; Call ESXDOS without any wrappers (ROM already mapped)
-        jr      c, .config_error
-        ;; Path found, move to next usernumber, stop when we reach 9
-        m_esxdos F_CLOSE                            ; Call ESXDOS without any wrappers (ROM already mapped)
+        call    .ensure_folder                      ; Open the folder, or make it if it is missing
+        ;; Folder found, move to next usernumber, stop when we reach 9
         pop     af                                  ; Get the user number ASCII back
         cp      '5'
         jr      z, .b_done
@@ -233,8 +221,29 @@ setup:                                   ; DPM starting up - initialise hardware
         
         jr .setup_hardware
 
-        ;; A drive folder is missing: DP/M ends and NextZXOS shows
-        ;; "Missing folder " and its path as the dot command's error
+        ;; Open the folder at working_path, and close it again. A missing
+        ;; folder is made with F_MKDIR; one that cannot be made goes to
+        ;; .config_error, so a missing install folder, whose drive folders
+        ;; cannot be made, stops the boot there. Preserves HL, dirties AF
+.ensure_folder:
+        push    hl
+        ld      hl, dynamic_data.working_path       ; Point to start of path
+        ld      a, '*'                              ; This doesn't matter, pathspec overrides it
+        m_esxdos F_OPENDIR                          ; Call ESXDOS without any wrappers (ROM already mapped)
+        jr      c, .make_folder
+        m_esxdos F_CLOSE                            ; A = the handle F_OPENDIR returned
+        pop     hl
+        ret
+.make_folder:
+        ld      hl, dynamic_data.working_path
+        ld      a, '*'                              ; This doesn't matter, pathspec overrides it
+        m_esxdos F_MKDIR                            ; Call ESXDOS without any wrappers (ROM already mapped)
+        jr      c, .config_error                    ; Resets the stack, so HL need not be popped
+        pop     hl
+        ret
+
+        ;; A drive folder is missing and cannot be made: DP/M ends and
+        ;; NextZXOS shows "Missing folder " and its path as the dot command's error
 .config_error:
         ld      hl, @error_report
         ld      de, @DotErr.MissingFolder
