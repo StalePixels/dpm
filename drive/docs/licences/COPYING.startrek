@@ -1,0 +1,14 @@
+/*
+ * startrek.c
+ *
+ * Super Star Trek Classic (v1.1)
+ * Retro Star Trek Game 
+ * C Port Copyright (C) 1996  <Chris Nystrom>
+ * 
+ * This program is free software; you can redistribute it and/or modify
+ * in any way that you wish. _Star Trek_ is a trademark of Paramount
+ * I think.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
