@@ -6,7 +6,8 @@
 ; A CP/M 2.2 Emulator for the Next - plays nice with BASIC, provides a FCB based
 ; filesystem layer emulator to allow limited access on FAT32 formatted drives.
 ;
-; The console is rows 0-23 of the 80x32 tilemap. It understands:
+; The console is consoleRows rows of the 80x32 tilemap, from row consoleTop
+; (addresses.asm). Its rows are numbered from 0. It understands:
 ;   BS              cursor left (wraps to the end of the row above)
 ;   TAB             cursor to the next multiple of 8, stopping at column 79
 ;   LF              cursor down, scrolling at the bottom
@@ -77,7 +78,6 @@ process:
 clear:
         call    map_graphics_mem
         push    hl : push bc : push de : push af; Preserve entry state
-func.clear_all:
         ld      hl, tilemapAddr;            ; Copy From First Entry
         ld      (hl), ' ';                  ; Put a space at the first entry in tilemap
         ld      de, tilemapAddr+1;          ; Copy To Subsequent Entry
@@ -85,12 +85,19 @@ func.clear_all:
         ldir                                ; ldi repeat. Go. (and fall throught)
         jp      set.ground
 ;
+; Clear the whole console
+func.clear_all:
+        ld      hl, consoleAddr
+        ld      bc, consoleRows*80
+        call    fill_spaces
+        jp      set.ground
+;
 ; Clear the whole screen and home the cursor
 func.clear_home:
         xor     a
         ld      (state.console_row), a
         ld      (state.console_column), a
-        ld      hl, tilemapAddr
+        ld      hl, consoleAddr
         ld      (state.console_pointer), hl
         jr      func.clear_all
 ;
@@ -165,12 +172,12 @@ func.print_char:
         ld      a, (state.console_row)
         inc     a
 .check_scroll:
-        cp      24
+        cp      consoleRows
         jp      z, .scroll             ; Z == Same, so scroll display
         ld      (state.console_row), a
         jr      .update_console_pointer
 .scroll:                                    ; Scroll the exiting text upwards
-        ld      a, 23
+        ld      a, consoleRows-1
         ld      (state.console_row), a
         call    screen_scroll;
 .update_console_pointer:
@@ -215,7 +222,7 @@ mode:                                ; MODE functions are used to handle what ha
 .esc_y_column:
         ld      (state.console_column), a
         ld      a, (state.param1)
-        cp      24
+        cp      consoleRows
         jp      nc, func.move_done          ; Row off the screen: the row does not change
         ld      (state.console_row), a
         jr      func.move_done
@@ -265,7 +272,7 @@ func.cursor_up:
         jr      func.move_done
 func.cursor_down:
         ld      a, (state.console_row)
-        cp      23
+        cp      consoleRows-1
         jr      nc, func.move_done
         inc     a
         ld      (state.console_row), a
@@ -306,7 +313,7 @@ func.reverse_lf:
 ;
 ; Clear from the cursor to the end of the console, cursor cell included
 func.clear_to_end:
-        ld      hl, tilemapAddr+(24*80)
+        ld      hl, consoleAddr+(consoleRows*80)
         ld      de, (state.console_pointer)
         or      a
         sbc     hl, de                      ; Cells from the cursor to the end
@@ -330,12 +337,12 @@ func.clear_line:
 ; Clear from the start of the console to the cursor, cursor cell included
 func.clear_to_cursor:
         ld      hl, (state.console_pointer)
-        ld      de, tilemapAddr-1
+        ld      de, consoleAddr-1
         or      a
         sbc     hl, de                      ; Cells from the start to the cursor
         ld      b, h
         ld      c, l
-        ld      hl, tilemapAddr
+        ld      hl, consoleAddr
         call    fill_spaces
         jp      set.ground
 ;
@@ -403,9 +410,9 @@ func.H_movecursor
                 call KERNEL_DEBUG.tm_a_loc4
     ENDIF
         call    .one_based
-        cp      24
+        cp      consoleRows
         jr      c, .row
-        ld      a, 23
+        ld      a, consoleRows-1
 .row:
         ld      (state.console_row), a
         ld      a, (state.param2)
@@ -439,7 +446,7 @@ calculate_console_pointer:
         ld      d, 0
         ld      hl, state.console_column
         ld      e, (hl)
-        ld      hl, tilemapAddr
+        ld      hl, consoleAddr
         add     hl, de
         push    hl                          ; Stash HL while we use it to load row
         ld      d, 80
@@ -519,16 +526,16 @@ fill_spaces:
 ; Scroll screen up one line
 ;     Dirties HL, DE, and BC
 screen_scroll:
-        ; Scroll rows 1->23, over 0->22
-        ld      hl, tilemapAddr+80          ; Copy From
-        ld      de, tilemapAddr             ; Copy To
-        ld      bc, 23*80                   ; Length of Copy
+        ; Scroll console rows 1 to the last, over 0 to the one before
+        ld      hl, consoleAddr+80          ; Copy From
+        ld      de, consoleAddr             ; Copy To
+        ld      bc, (consoleRows-1)*80      ; Length of Copy
         ldir                                ; ldi repeat. Go.  (and fall throught)
 
-        ; Blank row 23
-        ld      hl, tilemapAddr+(23*80)
+        ; Blank the last row
+        ld      hl, consoleAddr+((consoleRows-1)*80)
         ld      (hl), ' '
-        ld      de, tilemapAddr+(23*80)+1   ; Copy To
+        ld      de, consoleAddr+((consoleRows-1)*80)+1  ; Copy To
         ld      bc, 79                      ; Length of Copy
         ldir                                ; ldi repeat. Go.  (and fall throught)
         ret
@@ -537,14 +544,15 @@ screen_scroll:
 ; Scroll screen down one line
 ;     Dirties HL, DE, and BC
 screen_scroll_down:
-        ; Scroll rows 0->22, over 1->23, copying from the end backwards
-        ld      hl, tilemapAddr+(23*80)-1   ; Copy From
-        ld      de, tilemapAddr+(24*80)-1   ; Copy To
-        ld      bc, 23*80                   ; Length of Copy
+        ; Scroll console rows 0 to the one before the last, over 1 to the
+        ; last, copying from the end backwards
+        ld      hl, consoleAddr+((consoleRows-1)*80)-1  ; Copy From
+        ld      de, consoleAddr+(consoleRows*80)-1      ; Copy To
+        ld      bc, (consoleRows-1)*80      ; Length of Copy
         lddr
 
         ; Blank row 0
-        ld      hl, tilemapAddr
+        ld      hl, consoleAddr
         ld      bc, 80
         jr      fill_spaces
 
@@ -588,7 +596,7 @@ state:
 .console_row
         DB  0
 .console_pointer
-        DW  tilemapAddr
+        DW  consoleAddr
 .stage:
         DW  func.print_char
 .param1:

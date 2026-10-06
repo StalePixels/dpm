@@ -1,0 +1,40 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # sjasmplus release tag
+  SJASMPLUS_VERSION: v1.24.0
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: build sjasmplus
+        run: |
+          tmpdir="$(mktemp -d)"
+          trap 'rm -rf "$tmpdir"' EXIT
+          git clone --depth=1 --single-branch --branch "$SJASMPLUS_VERSION" \
+            https://github.com/z00m128/sjasmplus.git "$tmpdir/sjasmplus"
+          git -C "$tmpdir/sjasmplus" submodule update --init --depth=1 --jobs "$(nproc)"
+          make -C "$tmpdir/sjasmplus" -j"$(nproc)"
+          sudo make -C "$tmpdir/sjasmplus" install
+          sjasmplus --version
+      - name: make release
+        run: make release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dpm
+          path: build/dpm-*.zip
+          if-no-files-found: error

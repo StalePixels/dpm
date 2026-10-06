@@ -42,6 +42,12 @@ tilemapAddr             EQU     $6400
 tilemapHiByte           EQU     $64
 tileGfxAddr             EQU     $5C00       ; Tile definitions, 8 bytes per tile (NextReg $6F)
 
+    ;; Console: consoleRows rows of the 80x32 tilemap from row consoleTop. A
+    ;; 60 Hz display shows rows 1-30 only. Row 31 holds the DPM_DEBUG tracers.
+consoleTop              EQU     1
+consoleRows             EQU     30
+consoleAddr             EQU     tilemapAddr+(consoleTop*80)
+
     ;; Text cursor: tile 0 is drawn over the cell at the cursor and shows the
     ;; character there in inverse. The character it covers is kept in tile 1's
     ;; first byte, so bank 5 alone holds the whole screen. Tiles 0-31 are never

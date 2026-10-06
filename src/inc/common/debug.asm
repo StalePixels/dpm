@@ -8,9 +8,10 @@
 ;
 ;-----------------------------------------------------------------------------
 
-; Debug tracers: 1 assembles the hex values DP/M writes to rows 24-31 of the
-; screen (row 31 holds the BDOS/BIOS handler address, the last raw key, CSI
-; cursor parameters and each byte of an escape sequence). 0 leaves them out.
+; Debug tracers: 1 assembles the hex values DP/M writes to row 31 of the
+; screen, outside the console: the BDOS/BIOS handler address, the last raw
+; key, CSI cursor parameters and each byte of an escape sequence. 0 leaves
+; them out.
 DPM_DEBUG       EQU     0
 
 m_CSpect_BREAK MACRO

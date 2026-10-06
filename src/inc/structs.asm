@@ -52,4 +52,4 @@ mmu7                BYTE    $7
 .s_state_end
     ENDS
     
-STATE_SIZE          EQU      .s_state_end-.s_state_start
+STATE_SIZE          EQU      S_STATE

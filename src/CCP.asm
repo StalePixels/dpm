@@ -79,7 +79,7 @@ ccp_start:
         DISPLAY "ccp ORG\t:\t",/H,$
         
         MODULE CCP
-NLINES:     EQU    24           ; NUMBER OF LINES ON CRT SCREEN
+NLINES:     EQU    consoleRows  ; NUMBER OF LINES ON CRT SCREEN
 H19:        EQU    FALSE        ; USING HEATH H19/H89 TERMINAL
 HAZE:       EQU    FALSE        ; USING HAZELTINE 1500 TERMINAL
 FFTERM:     EQU    TRUE         ; USING TERMINAL THAT RESPONDS TO 0CH
