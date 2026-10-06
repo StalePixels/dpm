@@ -13,7 +13,7 @@ KR_STACK_SIZE   EQU         $80
     DISPLAY "kernel ORG\t:\t",/H,$
 kernel_start:
     INCLUDE "inc/kernel/ROM.asm"
-    INCLUDE "inc/kernel/MATHS.asm"
+    INCLUDE "inc/kernel/maths.asm"
     INCLUDE "inc/kernel/BIOS.asm"
     INCLUDE "inc/kernel/BDOS.asm"
     INCLUDE "inc/kernel/terminal.asm"
