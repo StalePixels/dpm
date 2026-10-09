@@ -30,27 +30,41 @@ IOBYTE_A        EQU     $0003       ;i/o byte location
 USERDRIVE_A     EQU     $0004       ;User/Drive flags
 BDOSPTR_A       EQU     $0006       ;address field of jmp BDOS
 
-    ;; BIOS entry that ends DP/M, as an offset from the warm boot address at $0001
-BIOS_EXIT_OFS   EQU     84
+    ;; DPM control, the BIOS entry for DP/M's own functions, as an offset from
+    ;; the warm boot address at $0001
+BIOS_CONTROL_OFS EQU    84
 
 TBUFF_A         EQU     $0080       ; DEFAULT DISK I/O BUFFER
 TFCB_A          EQU     $005C       ; DEFAULT FCB BUFFER
 TPA_A           EQU     $0100       ; BASE OF TPA
 
-    ;; Tilemap Textmode
+    ;; Tilemap Textmode: 80x32 cells of two bytes, the tile number's low 8 bits
+    ;; then the attribute (NextReg $6B = %11001011)
 tilemapAddr             EQU     $6400
 tilemapHiByte           EQU     $64
-tileGfxAddr             EQU     $5C00       ; Tile definitions, 8 bytes per tile (NextReg $6F)
+cellBytes               EQU     2
+rowBytes                EQU     80*cellBytes
 
-    ;; Console: consoleRows rows of the 80x32 tilemap from row consoleTop. A
-    ;; 60 Hz display shows rows 1-30 only. Row 31 holds the DPM_DEBUG tracers.
+    ;; Tile definitions, 8 bytes per tile, 512 tiles (NextReg $6F). Tiles 0-255
+    ;; are the font, tiles 256-511 the same font inverted. The ULA is off, so
+    ;; they can use its screen memory.
+glyphAddr               EQU     $4000
+glyphHiByte             EQU     $40
+glyphInverseAddr        EQU     glyphAddr+(256*8)
+
+    ;; Cell attribute: pair << 1 | reverse, with pair = bold*64 + ink*8 + paper.
+    ;; The pixel's palette index is pair*2 for paper and pair*2+1 for ink. Bit 0
+    ;; is bit 8 of the tile number, so reverse shows the inverted font.
+attrReverse             EQU     1
+defaultInk              EQU     2           ; Green
+defaultPaper            EQU     0           ; Black
+defaultAttr             EQU     ((defaultInk*8)+defaultPaper)<<1
+
+    ;; Console: consoleRows rows of the 80x32 tilemap from display row
+    ;; consoleTop. A 60 Hz display shows rows 1-30 only. Display row 31 holds
+    ;; the DPM_DEBUG tracers. The map rows are a ring that NextReg $31 scrolls
+    ;; (terminal.asm), so consoleAddr is console row 0 only while the map
+    ;; is not scrolled.
 consoleTop              EQU     1
 consoleRows             EQU     30
-consoleAddr             EQU     tilemapAddr+(consoleTop*80)
-
-    ;; Text cursor: tile 0 is drawn over the cell at the cursor and shows the
-    ;; character there in inverse. The character it covers is kept in tile 1's
-    ;; first byte, so bank 5 alone holds the whole screen. Tiles 0-31 are never
-    ;; printed, as codes below 32 are control codes.
-cursorTile              EQU     0
-cursorCharAddr          EQU     tileGfxAddr+8
+consoleAddr             EQU     tilemapAddr+(consoleTop*rowBytes)

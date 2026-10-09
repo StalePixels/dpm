@@ -24,6 +24,7 @@ entry:
         ; The parameter is passed in DE.
         ; Result returned in A or HL. Also, A=L and B=H on return for compatibility reasons.
         ; KERNEL.bdos_dispatch finds the function and handles a number out of range.
+        di                                   ; The kernel runs with interrupts off
         ld      (.exit_stack), sp            ; Keep the caller's stack pointer, for the way out
         ld      sp, BIOS.stack
 
@@ -44,6 +45,7 @@ entry:
         ; a 16-bit value. The BDOS returns A = L and B = H in all cases.
         ld      l, a
         ld      h, b
+        ei                                   ; Back in the CP/M program, the cursor blinks
         ret
 
 .exit_stack:
@@ -239,7 +241,103 @@ diskalloc:
         db      $FF
         ds      DPB_DSM/8, 0
     ENDMODULE
-    
+
+
+;-----------------------------------------------------------------------------
+; The frame interrupt: type-ahead and the cursor blink. DP/M runs the Z80 in
+; IM 2 with the Next's hardware IM2 vectors (NextReg $C0 bit 0), and only the
+; ULA frame interrupt enabled (NextReg $C4). Interrupts are on while a CP/M
+; program runs and while the BIOS waits for a key, and off while the kernel
+; runs. The vectors and the routine are here because slot 7 holds this page
+; in every mapping.
+;-----------------------------------------------------------------------------
+    MODULE  BLINK
+frames          EQU     25                  ; Frames between flips: half a second at 50 Hz
+
+; I is the table's page and NextReg $C0 bits 7:5 its offset in the page.
+; Vector n is at 2n; vector 11 is the ULA frame interrupt.
+    ALIGN   32
+vectors:
+        DUP     11
+        DW      ignore
+        EDUP
+        DW      frame
+        DUP     4
+        DW      ignore
+        EDUP
+        ASSERT  (vectors & $1F) == 0 && $-vectors == 32
+
+; While a CP/M program runs, scan the keyboard for a new key and put its
+; bytes in the console queue (KERNEL.console_scan), so a key pressed while
+; the program is busy waits there until it is read. The kernel goes into
+; slots 4 and 5 for the scan, and the userland pages go back after. While
+; BIOS_CONIN waits (waiting is not 0) the kernel is mapped and scans the
+; keyboard itself, so the keyboard state and the queue are left alone: the
+; kernel touches them only with interrupts off or in that wait.
+; Every frames frames, flip the reverse bit of the cursor's cell, with bank
+; 5 in slots 2 and 3, and the userland pages back after.
+; The pages change with NEXTREG, which leaves the NextReg select port $243B
+; alone. The routine runs on its own stack, so the interrupted stack holds
+; only the return address.
+frame:
+        ld      (interrupted_sp), sp
+        ld      sp, stack
+        push    af
+        push    hl
+        ld      a, (waiting)
+        or      a                           ; Is BIOS_CONIN waiting?
+        jr      nz, .blink                  ; ...Yes, it scans the keyboard
+        push    bc
+        push    de
+.SMC_MMU4_kernel EQU $+3:
+        nextreg MMU4_8000_NR_54, $AA        ; The kernel, $AA replaced at setup
+.SMC_MMU5_kernel EQU $+3:
+        nextreg MMU5_A000_NR_55, $AA
+        call    KERNEL.console_scan         ; A new key into the console queue
+.SMC_MMU4_userland EQU $+3:
+        nextreg MMU4_8000_NR_54, $AA        ; Userland, $AA replaced at setup
+.SMC_MMU5_userland EQU $+3:
+        nextreg MMU5_A000_NR_55, $AA
+        pop     de
+        pop     bc
+.blink:
+        ld      hl, count
+        dec     (hl)
+        jr      nz, .done
+        ld      (hl), frames
+        ld      hl, (cell)
+        ld      a, h
+        or      l
+        jr      z, .done                    ; No cursor
+        nextreg MMU2_4000_NR_52, $0A        ; Bank 5, the tilemap
+        nextreg MMU3_6000_NR_53, $0B
+        ld      a, (hl)
+        xor     attrReverse
+        ld      (hl), a
+.SMC_MMU2 EQU $+3:
+        nextreg MMU2_4000_NR_52, $AA        ; Userland, $AA replaced at setup
+.SMC_MMU3 EQU $+3:
+        nextreg MMU3_6000_NR_53, $AA
+.done:
+        pop     hl
+        pop     af
+        ld      sp, (interrupted_sp)
+ignore:
+        ei
+        reti
+
+count:                                      ; Frames to the next flip
+        db      frames
+cell:                                       ; The cursor's attribute byte, 0 for no cursor
+        dw      0
+waiting:                                    ; Not 0 while BIOS_CONIN waits for a key
+        db      0
+interrupted_sp:                             ; The interrupted program's stack pointer
+        dw      0
+        ds      32, $AA                     ; The routine's stack: its registers and console_scan
+stack:
+    ENDMODULE
+
     DISPLAY "BDOS END\t:\t",/H,$
 bdos_end:
 ;-----------------------------------------------------------------------------

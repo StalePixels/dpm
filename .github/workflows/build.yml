@@ -31,6 +31,11 @@ jobs:
           make -C "$tmpdir/sjasmplus" -j"$(nproc)"
           sudo make -C "$tmpdir/sjasmplus" install
           sjasmplus --version
+      - name: install z88dk
+        run: |
+          sudo snap install z88dk --beta
+          sudo snap alias z88dk.zcc zcc
+          command -v zcc
       - name: make release
         run: make release
       - uses: actions/upload-artifact@v7

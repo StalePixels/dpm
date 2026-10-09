@@ -39,9 +39,10 @@ WBOOTE
         jp      entry_WRITE         ;14;39: Write a sector
         jp      entry_LISTST        ;15:42: Status of list device
         jp      entry_SECTRAN       ;16:45: Sector translation for skewing
-        ; Entries 17 to 28 return at once. Entry 29 is DP/M's own: it ends
-        ; DP/M and returns to NextZXOS. It sits in the slot kept for the user
-        ; function, WBOOTE+BIOS_EXIT_OFS, where EXIT.COM and the CCP's EXIT
+        ; Entries 17 to 28 return at once. Entry 29 is DP/M's own, DPM
+        ; control: DP/M's functions, the function number in C ($00 ends DP/M
+        ; and returns to NextZXOS). It sits in the slot kept for the user
+        ; function, WBOOTE+BIOS_CONTROL_OFS, where EXIT.COM and the CCP's EXIT
         ; find it from the warm boot address at $0001.
         ret : nop : nop             ;17:48: NOP
         ret : nop : nop             ;18:51: NOP
@@ -55,13 +56,14 @@ WBOOTE
         ret : nop : nop             ;26:75: NOP
         ret : nop : nop             ;27:78: NOP
         ret : nop : nop             ;28:81: NOP
-EXITE
-        jp      entry_EXIT          ;29:84: Exit DP/M to NextZXOS
-        ASSERT  EXITE-WBOOTE == BIOS_EXIT_OFS
+CONTROLE
+        jp      entry_CONTROL       ;29:84: DPM control, function in C
+        ASSERT  CONTROLE-WBOOTE == BIOS_CONTROL_OFS
         
 // Private BIOS routine to call internal Kernel BDOS function
 //  function address passed in hl, params in DE
 internal_KERNEL_call:
+        di                                  ; The kernel runs with interrupts off
 .SMC_MMU4_kernel EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_kernel EQU $+3:
@@ -86,11 +88,12 @@ internal_KERNEL_call:
         ;; return stack to original location
 internal_TEARDOWN.SMC_exitstack EQU $+1
         ld      sp, 0xAAAA                  ; restore original stack pointer, as above 0xAAAA is SMC.
-
+        ei                                  ; Back in the CP/M program, the cursor blinks
         ret
 
 ; Warm boot: the CCP comes back on the drive and user kept in USERDRIVE_A
 reentry_BOOTROOM:
+        di
 .SMC_MMU4_kernel EQU $+3:
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_kernel EQU $+3:
@@ -122,6 +125,7 @@ entry_BOOTROM:
         nextreg	MMU5_A000_NR_55, 0xAA
 
         ld      c, a                    ; The CCP takes the drive and user in C
+        ei
         jp      hl
         
 entry_BOOT:                         ;-3: Cold start routine
@@ -173,8 +177,8 @@ entry_LISTST:                       ;42: Status of list device
 entry_SECTRAN:                      ;45: Sector translation for skewing
         m_BIOSStackAndCall KERNEL.BIOS_SECTRAN
         
-entry_EXIT:                         ;84: Close every open file, end DP/M, return to NextZXOS
-        m_BIOSStackAndCall KERNEL.BIOS_EXIT
+entry_CONTROL:                      ;84: DPM control, function in C
+        m_BIOSStackAndCall KERNEL.BIOS_CONTROL
 
 kr_stack:
     DW  0xAAAA                  ; This is what the stack was when the kernel passed control to CP/M

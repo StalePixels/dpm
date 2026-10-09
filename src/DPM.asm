@@ -40,7 +40,16 @@ dot_start:
     ;; Version fingerprint to allow external version tracking
         DB DPMname, "@", DPMversion, 0   
 init:
+        ld      a, i                        ; P/V = IFF2: interrupts on or off at entry
+        jp      pe, .iff_read
+        ld      a, i                        ; Again: an interrupt taken just after the first read clears P/V
+.iff_read:
         di                                  ; Disable interrupts for safe paging
+        ld      a, $FB                      ; EI at exit, as interrupts were on
+        jp      pe, .iff_kept
+        xor     a                           ; NOP at exit, as they were off
+.iff_kept:
+        ld      (ei_exit.SMC_iff), a
         ld      (state.argsPtr),hl          ; preserve pointer to arguments
         call    save_args                   ; Keep them while BASIC's memory is still paged in
         m_PrintMsg DotMsg.Startup           ; Display our own startup message
@@ -395,7 +404,8 @@ state_exit:                             ; slightly inefficent if following throu
         m_PrintMsg DotMsg.Shutdown          ; Graceful exit message
                                             ; & fallow through
 ei_exit:
-        ei                                  ; Finally enable interrupts for BASIC, now memmap restored
+.SMC_iff:
+        ei                                  ; Interrupts as they were at entry: EI, or NOP set by init
         ret                                 ; and finally exit gracefully
 
 ;-----------------------------------------------------------------------------

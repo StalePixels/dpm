@@ -9,180 +9,192 @@
     MODULE KERNEL_DEBUG
 tm_a_loc0:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+0
+        ld      hl, 0*cellBytes
         jp tm_a_to_hl
 tm_a_loc2:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+2
+        ld      hl, 2*cellBytes
         jp tm_a_to_hl
 tm_a_loc4:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+4
+        ld      hl, 4*cellBytes
         jp tm_a_to_hl
 tm_a_loc6:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+6
+        ld      hl, 6*cellBytes
         jp tm_a_to_hl
 tm_a_loc8:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+8
+        ld      hl, 8*cellBytes
         jp tm_a_to_hl
 tm_a_loc10:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+10
+        ld      hl, 10*cellBytes
         jp tm_a_to_hl
 tm_a_loc12:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+12
+        ld      hl, 12*cellBytes
         jp tm_a_to_hl
 tm_a_loc14:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+14
+        ld      hl, 14*cellBytes
         jp tm_a_to_hl
 tm_a_loc16:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+16
+        ld      hl, 16*cellBytes
         jp tm_a_to_hl
 tm_a_loc18:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+18
+        ld      hl, 18*cellBytes
         jp tm_a_to_hl
 tm_a_loc20:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+20
+        ld      hl, 20*cellBytes
         jp tm_a_to_hl
 tm_a_loc22:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+22
+        ld      hl, 22*cellBytes
         jp tm_a_to_hl
         
 tm_a_loc24:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+24
+        ld      hl, 24*cellBytes
         jp tm_a_to_hl
 tm_a_loc26:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+26
+        ld      hl, 26*cellBytes
         jp tm_a_to_hl
 tm_a_loc28:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+28
+        ld      hl, 28*cellBytes
         jp tm_a_to_hl
 tm_a_loc30:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+30
+        ld      hl, 30*cellBytes
         jp tm_a_to_hl
 tm_a_loc32:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+32
+        ld      hl, 32*cellBytes
         jp tm_a_to_hl
 tm_a_loc34:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+34
+        ld      hl, 34*cellBytes
         jp tm_a_to_hl
 tm_a_loc36:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+36
+        ld      hl, 36*cellBytes
         jp tm_a_to_hl
 tm_a_loc38:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+38
+        ld      hl, 38*cellBytes
         jp tm_a_to_hl
 tm_a_loc40:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+40
+        ld      hl, 40*cellBytes
         jp tm_a_to_hl
 tm_a_loc42:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+42
+        ld      hl, 42*cellBytes
         jp tm_a_to_hl
 tm_a_loc44:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+44
+        ld      hl, 44*cellBytes
         jp tm_a_to_hl
 tm_a_loc46:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+46
+        ld      hl, 46*cellBytes
         jp tm_a_to_hl
 tm_a_loc48:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+48
+        ld      hl, 48*cellBytes
         jp tm_a_to_hl
 tm_a_loc50:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+50
+        ld      hl, 50*cellBytes
         jp tm_a_to_hl
 tm_a_loc52:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+52
+        ld      hl, 52*cellBytes
         jp tm_a_to_hl
 tm_a_loc54:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+54
+        ld      hl, 54*cellBytes
         jp tm_a_to_hl
 tm_a_loc56:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+56
+        ld      hl, 56*cellBytes
         jp tm_a_to_hl
 tm_a_loc58:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+58
+        ld      hl, 58*cellBytes
         jp tm_a_to_hl
 tm_a_loc60:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+60
+        ld      hl, 60*cellBytes
         jp tm_a_to_hl
 tm_a_loc62:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+62
+        ld      hl, 62*cellBytes
         jp tm_a_to_hl
 tm_a_loc64:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+64
+        ld      hl, 64*cellBytes
         jp tm_a_to_hl
 tm_a_loc66:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+66
+        ld      hl, 66*cellBytes
         jp tm_a_to_hl
 tm_a_loc68:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+68
+        ld      hl, 68*cellBytes
         jp tm_a_to_hl
 tm_a_loc70:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+70
+        ld      hl, 70*cellBytes
         jp tm_a_to_hl
 tm_a_loc72:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+72
+        ld      hl, 72*cellBytes
         jp tm_a_to_hl
 tm_a_loc74:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+74
+        ld      hl, 74*cellBytes
         jp tm_a_to_hl
 tm_a_loc76:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+76
+        ld      hl, 76*cellBytes
         jp tm_a_to_hl
 tm_a_loc78:
         push    hl
-        ld      hl, tilemapAddr+(31*80)+78
+        ld      hl, 78*cellBytes
         jp tm_a_to_hl
 
-tm_a_to_hl:
+tm_a_to_hl:                     ; HL = the column's offset in display row 31
         push    af              ; Debug routines need to preserve everything
         push    bc
-        call    KERNEL_TERM.map_graphics_mem
+        push    de
         ld      c, a            ; Copy our debug value to C for later
+        push    hl
+        ld      a, 31
+        call    KERNEL_TERM.display_row_addr
+        pop     de
+        add     hl, de
+        pop     de
+        call    KERNEL_TERM.map_graphics_mem
+        ld      a, c
         rra : rra : rra : rra   ; First nybble now in Least Significant 4 bits
         
         call    nybble_to_ASCIIhex
-        ld      (hl), a             ; Place Higher Nybble Hex onto tilemap at col 40
+        ld      (hl), a             ; Place Higher Nybble Hex onto tilemap
+        inc     hl
+        ld      (hl), defaultAttr
         
         ld      a,c                 ; Get original hex value back
         call    nybble_to_ASCIIhex
         inc     hl
-        ld      (hl), a             ; Place Higher Nybble Hex onto tilemap at col 41
+        ld      (hl), a             ; Place Lower Nybble Hex in the next cell
+        inc     hl
+        ld      (hl), defaultAttr
         
         call    KERNEL_TERM.unmap_graphics_mem
         pop     bc

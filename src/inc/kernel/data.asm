@@ -10,6 +10,8 @@
 
     MODULE KERNEL
 
+CONFIG_MAX      EQU     1024                ; The longest config.ini that DPM control rewrites
+
 ;; STATIC DATAs
 strings:
 .path: 
@@ -29,6 +31,24 @@ strings:
 
 .ccp_name:
         DB "CCP.COM", 0                     ; The CCP, loaded from config.install_path
+.config_name:
+        DB "config.ini", 0                  ; DP/M's settings, in config.install_path
+.console_section:
+        DB "[console]", 0
+.key_ink:
+        DB "ink=", 0
+.key_paper:
+        DB "paper=", 0
+.colour_names:                              ; The colours in SGR order, 8 bytes each
+        DB "black", 0, 0, 0
+        DB "red", 0, 0, 0, 0, 0
+        DB "green", 0, 0, 0
+        DB "yellow", 0, 0
+        DB "blue", 0, 0, 0, 0
+        DB "magenta", 0
+        DB "cyan", 0, 0, 0, 0
+        DB "white", 0, 0, 0
+        ASSERT  $-.colour_names == 8*8
 
 cp437_font:
         DISPLAY "kernel glyphs\t:\t",/H,$
@@ -56,7 +76,27 @@ dynamic_data:
 .current_file
         DB  0
 
-.console_cache
+.console_queue                              ; Console input, a ring: keys and terminal replies
+        DS  16, $00
+.console_head                               ; Index of the next byte out
+        DB  0
+.console_tail                               ; Index of the next byte in; head == tail is empty
+        DB  0
+.console_last                               ; The last byte taken from the queue
+        DB  0
+
+.tilemap_palette                            ; NextZXOS's tilemap first palette, put back
+        DS  512, $00                        ; at exit: per colour, bits 8-1 then bit 0
+
+.config_text                               ; config.ini as read, ending in 0
+        DS  CONFIG_MAX+1, $00
+.config_end                                 ; The address of the 0 that ends config_text
+        DW  0
+.config_new                                 ; The [console] section, as it is written
+        DS  40, $00
+.config_handle                              ; config.ini, while it is written
+        DB  0
+.config_error                               ; $FF after an error writing config.ini
         DB  0
 
 .autocmd                                    ; Command line from the dot command's arguments, run

@@ -6,6 +6,7 @@ TOUCH:=touch
 MKDIR:=mkdir -pv
 ECHO:=echo
 SJASMPLUS:=sjasmplus
+ZCC:=zcc
 HDIUTIL:=hdiutil
 MAME:=mame
 SEQ:=seq
@@ -48,7 +49,7 @@ MAME_RUN:=$(MAME) $(MAME_SYS) -hard1 $(IMAGE) \
 		-window -nomaximize -resolution 1024x768 -nothrottle \
 		-debug -plugin nextbreak,debugstart,nextfaststart
 
-.PHONY: dev emulate turbo dot ccp exit cpmish release install_emu autoexec mount_image unmount_image \
+.PHONY: dev emulate turbo dot ccp exit concolor cpmish release install_emu autoexec mount_image unmount_image \
         cspect cspect_turbo setup_emulator setup_emulator_testfiles \
         _setup_dirs _setup_files
 
@@ -85,6 +86,13 @@ exit:
 	cd src && $(SJASMPLUS) EXIT.asm
 	$(CP) build/EXIT.COM $(DRIVE_A0)/EXIT.COM
 
+# CONCOLOR.COM, the CP/M program that sets DP/M's default console colours,
+# a C program built with z88dk into DRIVE_A0 with the other drive A, user 0
+# programs.
+concolor:
+	cd src/concolor && $(ZCC) +cpm -O2 concolor.c -o ../../build/CONCOLOR.COM
+	$(CP) build/CONCOLOR.COM $(DRIVE_A0)/CONCOLOR.COM
+
 # Rebuild cpmish's programs (dev/cpmish/build.sh, in Docker) into a temporary
 # folder, then replace the .COM files in DRIVE_A0 with them, names upper-cased
 # as on a CP/M disk.
@@ -99,7 +107,7 @@ cpmish:
 # CCP.COM, the empty drive folders A/0..15 and B/0..15 (stored as folder
 # entries, so they exist after extraction), the DRIVE_A0 programs in A/0, and
 # the licences in docs/. Nothing else.
-release: dot ccp exit
+release: dot ccp exit concolor
 	rm -f $(RELEASE_ZIP)
 	tmp=$$(mktemp -d) && \
 	$(CP) build/DPM build/CCP.COM $$tmp/ && \

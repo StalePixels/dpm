@@ -67,18 +67,35 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (exit.SMC_palette_ctrl), a; Save palette control
         m_NextRegRead_c PALETTE_INDEX_NR_40 ; Read palette index
         ld      (exit.SMC_palette_index), a; Save palette index
+        m_NextRegRead_c ULA_CONTROL_NR_68   ; Read ULA control
+        ld      (exit.SMC_ula_ctrl), a      ; Save ULA control
+        m_NextRegRead_c TILEMAP_DEFAULT_ATTR_NR_6C; Read default tilemap attribute
+        ld      (exit.SMC_tilemap_attr), a  ; Save default tilemap attribute
+        m_NextRegRead_c TILEMAP_YOFFSET_NR_31; Read tilemap Y offset
+        ld      (exit.SMC_tilemap_yoffset), a; Save tilemap Y offset
+        m_NextRegRead_c INTERRUPT_CONTROL_NR_C0; Read interrupt control
+        ld      (exit.SMC_int_ctrl), a      ; Save interrupt control
+        m_NextRegRead_c INT_EN_0_NR_C4      ; Read the interrupt enables
+        ld      (exit.SMC_int_en_0), a      ; Save them
+        m_NextRegRead_c INT_EN_1_NR_C5
+        ld      (exit.SMC_int_en_1), a
+        m_NextRegRead_c INT_EN_2_NR_C6
+        ld      (exit.SMC_int_en_2), a
         
         nextreg PALETTE_CONTROL_NR_43, 0x30 ; Tilemap first palette
-        nextreg PALETTE_INDEX_NR_40, 0      ; Colour 0, all 9 bits ($41 reads bits 8-1, $44 bit 0)
+        ld      hl, dynamic_data.tilemap_palette
+        ld      e, 0                        ; Every colour, all 9 bits ($41 reads bits 8-1, $44 bit 0)
+.save_palette:
+        ld      a, e
+        nextreg PALETTE_INDEX_NR_40, a      ; A read does not move the index
         m_NextRegRead_c PALETTE_VALUE_NR_41
-        ld      (exit.SMC_tilemap_palette_0), a
+        ld      (hl), a
+        inc     hl
         m_NextRegRead_c PALETTE_VALUE_9BIT_NR_44
-        ld      (exit.SMC_tilemap_palette_0_lsb), a
-        nextreg PALETTE_INDEX_NR_40, 1      ; Colour 1, a read does not move the index
-        m_NextRegRead_c PALETTE_VALUE_NR_41
-        ld      (exit.SMC_tilemap_palette_1), a
-        m_NextRegRead_c PALETTE_VALUE_9BIT_NR_44
-        ld      (exit.SMC_tilemap_palette_1_lsb), a
+        ld      (hl), a
+        inc     hl
+        inc     e
+        jr      nz, .save_palette
 
 .load_config:
         /* 
@@ -97,6 +114,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      de, config.install_path
         ld      hl, dynamic_data.working_path
         call    KERNEL.strcpy
+        call    .check_install                  ; The install folder must be there
         
         push    hl                      ; Stack now: RETADDR, A ptr
         ld      (hl), 'A'
@@ -221,10 +239,22 @@ setup:                                   ; DPM starting up - initialise hardware
         
         jr .setup_hardware
 
+        ;; Open the install folder at working_path, and close it again. It is
+        ;; never made: a missing one goes to .config_error. Preserves HL,
+        ;; dirties AF
+.check_install:
+        push    hl
+        ld      hl, dynamic_data.working_path       ; Point to start of path
+        ld      a, '*'                              ; This doesn't matter, pathspec overrides it
+        m_esxdos F_OPENDIR                          ; Call ESXDOS without any wrappers (ROM already mapped)
+        jr      c, .config_error                    ; Resets the stack, so HL need not be popped
+        m_esxdos F_CLOSE                            ; A = the handle F_OPENDIR returned
+        pop     hl
+        ret
+
         ;; Open the folder at working_path, and close it again. A missing
         ;; folder is made with F_MKDIR; one that cannot be made goes to
-        ;; .config_error, so a missing install folder, whose drive folders
-        ;; cannot be made, stops the boot there. Preserves HL, dirties AF
+        ;; .config_error. Preserves HL, dirties AF
 .ensure_folder:
         push    hl
         ld      hl, dynamic_data.working_path       ; Point to start of path
@@ -242,8 +272,9 @@ setup:                                   ; DPM starting up - initialise hardware
         pop     hl
         ret
 
-        ;; A drive folder is missing and cannot be made: DP/M ends and
-        ;; NextZXOS shows "Missing folder " and its path as the dot command's error
+        ;; The install folder is missing, or a drive folder is missing and
+        ;; cannot be made: DP/M ends and NextZXOS shows "Missing folder " and
+        ;; its path as the dot command's error
 .config_error:
         ld      hl, @error_report
         ld      de, @DotErr.MissingFolder
@@ -269,9 +300,11 @@ setup:                                   ; DPM starting up - initialise hardware
         
         ld      a, (KERNEL.dynamic_data.state.mmu2)         ; Get MMU1(userland1) and patch the following
         ld      (KERNEL_TERM.unmap_graphics_mem.SMC_MMU2), a
+        ld      (BLINK.frame.SMC_MMU2), a
         
         ld      a, (KERNEL.dynamic_data.state.mmu3)         ; Get MMU2(userland2) and patch the following
         ld      (KERNEL_TERM.unmap_graphics_mem.SMC_MMU3), a
+        ld      (BLINK.frame.SMC_MMU3), a
         
         ld      a, (KERNEL.dynamic_data.state.mmu4)         ; Get MMU3(userland3) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU4_userland), a
@@ -282,6 +315,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_userland), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_userland), a
         ld      (BDOS.copy_userland.SMC_MMU4_userland), a
+        ld      (BLINK.frame.SMC_MMU4_userland), a
         
         ld      a, (KERNEL.dynamic_data.state.mmu5)         ; Get MMU4(userland5) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU5_userland), a
@@ -292,6 +326,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_userland), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU5_userland), a
         ld      (BDOS.copy_userland.SMC_MMU5_userland), a
+        ld      (BLINK.frame.SMC_MMU5_userland), a
         
         ;ld      a, (KERNEL.dynamic_data.state.mmu6)         ; Get MMU6(userland6) and patch the following
         
@@ -306,6 +341,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_kernel), a
         ld      (BDOS.copy_userland.SMC_MMU4_kernel), a
+        ld      (BLINK.frame.SMC_MMU4_kernel), a
         
         ld      a, (KERNEL.dynamic_data.state.kernel1)      ; Get MMU4(kernel1) and patch the following
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU5_kernel), a
@@ -316,6 +352,7 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_kernel), a
         ld      (BDOS.copy_dma_in_kernel.SMC_MMU5_kernel), a
         ld      (BDOS.copy_userland.SMC_MMU5_kernel), a
+        ld      (BLINK.frame.SMC_MMU5_kernel), a
         
         ;; Store the DivMMC RAM control port so we can map/unmap it
         in      a, DIVMMC_CONTROL_P_E3          ; Get the current DivMMC mapping
@@ -335,28 +372,34 @@ setup:                                   ; DPM starting up - initialise hardware
         
         ;; Copy font ASCII out of ROM
         ld      hl, $3D00;                  ; Copy From
-        ld      de, $5D00;                  ; Copy To
+        ld      de, glyphAddr+(32*8);       ; Copy To, tiles 32-127
         ld      bc, $0300;                  ; Length of Copy
         ldir                                ; ldi repeat. Go. 
         
         ; ;; Copy font CP437-2 out of ROM
         ld      hl, cp437_font;             ; Copy From
-        ld      de, $6000;                  ; Copy To
+        ld      de, glyphAddr+(128*8);      ; Copy To, tiles 128-255
         ld      bc, $0400;                  ; Length of Copy
         ldir                                ; ldi repeat. Go. 
         
-        ;; Wipe the ULA Pixel area
-        ld hl, 16384                        ;pixels
-        ld de, 16385                        ;pixels + 1
-        ld bc, 6144                         ;pixel area
-        ld (hl), l                          ;set first byte to '0' as HL = 16384 = $4000  therefore L = 0
-        ldir                                ;copy bytes 
-
-        ;; Wipe the ULA Attribute area
-        ld a, 56                            ;attributte
-        ld bc, 768                          ;attribute area length - 1
-        ld (hl), 0                          ;set first byte to attribute value
-        ldir                                ;copy bytes 
+        ;; Tiles 256-511: tiles 0-255 inverted, for reverse video
+        ld      hl, glyphAddr
+        ld      de, glyphInverseAddr
+        ld      bc, 256*8
+.invert_font:
+        ld      a, (hl)
+        cpl
+        ld      (de), a
+        inc     hl
+        inc     de
+        dec     bc
+        ld      a, b
+        or      c
+        jr      nz, .invert_font
+        
+        call    config_read                 ; The default colours, from config.ini
+        call    config_colours
+        call    KERNEL_TERM.set_defaults
         
         call KERNEL_TERM.clear                ; Clear entire tilemap
         
@@ -364,26 +407,37 @@ setup:                                   ; DPM starting up - initialise hardware
         ;;  The values these replace were saved at the start of setup
         nextreg TILEMAP_BASE_ADR_NR_6E, tilemapHiByte; Tilemap base address high byte
         
-        nextreg TILEMAP_GFX_ADR_NR_6F, 0x5C ; Tile dataaddress at 0x6C00, ASCII @ 0x5D00
+        nextreg TILEMAP_GFX_ADR_NR_6F, glyphHiByte; Tile definitions at glyphAddr
         
-        nextreg GLOBAL_TRANSPARENCY_NR_14, 0x00; Confirm that the transparency is E3
-        
-        nextreg TRANSPARENCY_FALLBACK_COL_NR_4A, 0x00; Set the fallback colour to black
-        
-        nextreg TILEMAP_CONTROL_NR_6B, 0b11101010; Set tilemap control
-        /*                               | | | | bit 0 = Tilemap on top of ULA
-                                         | | | +-bit 1 = 512 tile mode
-                                         | | |   bit 2 = Reserved, must be 0
-                                         | | +---bit 3 = Select textmode
-                                         | |     bit 4 = Palette select 
-                                         | +-----bit 5 = Eliminate attribute entry in tilemap
-                                         |       bit 6 = 0 for 40x32, 1 for 80x32
+        nextreg TILEMAP_CONTROL_NR_6B, 0b11001011; Set tilemap control
+        /*                               ||||||||
+                                         |||||||+bit 0 = Tilemap on top of ULA
+                                         ||||||+-bit 1 = 512 tile mode
+                                         |||||+--bit 2 = Reserved, must be 0
+                                         ||||+---bit 3 = Select textmode
+                                         |||+----bit 4 = Palette select (first)
+                                         ||+-----bit 5 = Eliminate attribute entry in tilemap (no)
+                                         |+------bit 6 = 0 for 40x32, 1 for 80x32
                                          +-------bit 7 = 1 Enable the tilemap                   */
         
-        nextreg     PALETTE_CONTROL_NR_43, 0x30; Tilemap primary palette
-        nextreg     PALETTE_INDEX_NR_40, 0; Set palette place to first entry
-        nextreg     PALETTE_VALUE_NR_41, 0x00       ;     Set new colour 0: Black
-        nextreg     PALETTE_VALUE_NR_41, 0b00011100 ;     Set new colour 1: Green
+        ld      a, (exit.SMC_ula_ctrl)
+        or      %10000000                   ; Bit 7: ULA output off
+        nextreg ULA_CONTROL_NR_68, a
+        
+        call    KERNEL_TERM.load_palette    ; The 128 colour pairs
+        
+        ;; The frame interrupt (BLINK), type-ahead and the cursor blink: IM 2
+        ;; with hardware IM2 vectors, the ULA frame interrupt only. Interrupts stay off until the CCP starts
+        ld      a, high BLINK.vectors
+        ld      i, a
+        im      2
+        ld      a, (exit.SMC_int_ctrl)
+        and     %00001000                   ; Keep the stackless NMI setting
+        or      (low BLINK.vectors) | 1     ; The vectors' offset in the page, hardware IM2
+        nextreg INTERRUPT_CONTROL_NR_C0, a
+        nextreg INT_EN_0_NR_C4, %00000001   ; ULA frame interrupt only
+        nextreg INT_EN_1_NR_C5, 0
+        nextreg INT_EN_2_NR_C6, 0
         
         ld          (BIOS.kr_stack), sp ; Tell the BIOS where the kernel stack currently is
         
@@ -442,16 +496,39 @@ exit:                                    ; DPM exiting - safely shut down the VM
 .SMC_tilemap_ctrl EQU $+3:
         nextreg TILEMAP_CONTROL_NR_6B, 0xAA; Restore tilemap control
         
+.SMC_tilemap_attr EQU $+3:
+        nextreg TILEMAP_DEFAULT_ATTR_NR_6C, 0xAA; Restore default tilemap attribute
+        
+.SMC_tilemap_yoffset EQU $+3:
+        nextreg TILEMAP_YOFFSET_NR_31, 0xAA; Restore tilemap Y offset
+        
+.SMC_ula_ctrl EQU $+3:
+        nextreg ULA_CONTROL_NR_68, 0xAA     ; Restore ULA control
+        
+.SMC_int_ctrl EQU $+3:
+        nextreg INTERRUPT_CONTROL_NR_C0, 0xAA; Restore interrupt control; the IM mode bits are read only
+.SMC_int_en_0 EQU $+3:
+        nextreg INT_EN_0_NR_C4, 0xAA        ; Restore the interrupt enables
+.SMC_int_en_1 EQU $+3:
+        nextreg INT_EN_1_NR_C5, 0xAA
+.SMC_int_en_2 EQU $+3:
+        nextreg INT_EN_2_NR_C6, 0xAA
+        
+        im      1                           ; NextZXOS runs in IM 1, so a dot command returns to IM 1
+        push    af : push bc : push hl      ; A and the carry flag carry the exit state
         nextreg     PALETTE_CONTROL_NR_43, 0x30; Tilemap primary palette, index moves on after each colour
         nextreg     PALETTE_INDEX_NR_40, 0; First Entry
-.SMC_tilemap_palette_0 EQU $+3:
-        nextreg     PALETTE_VALUE_9BIT_NR_44, 0xAA  ;     Colour 0, bits 8-1
-.SMC_tilemap_palette_0_lsb EQU $+3:
-        nextreg     PALETTE_VALUE_9BIT_NR_44, 0xAA  ;     Colour 0, bit 0
-.SMC_tilemap_palette_1 EQU $+3:
-        nextreg     PALETTE_VALUE_9BIT_NR_44, 0xAA  ;     Colour 1, bits 8-1
-.SMC_tilemap_palette_1_lsb EQU $+3:
-        nextreg     PALETTE_VALUE_9BIT_NR_44, 0xAA  ;     Colour 1, bit 0
+        ld      hl, dynamic_data.tilemap_palette
+        ld      b, 0                        ; All 256 colours
+.restore_palette:
+        ld      a, (hl)
+        nextreg     PALETTE_VALUE_9BIT_NR_44, a  ; Bits 8-1
+        inc     hl
+        ld      a, (hl)
+        nextreg     PALETTE_VALUE_9BIT_NR_44, a  ; Bit 0
+        inc     hl
+        djnz    .restore_palette
+        pop     hl : pop bc : pop af
 .SMC_palette_ctrl EQU $+3:
         nextreg     PALETTE_CONTROL_NR_43, 0xAA; Restore palette control
 .SMC_palette_index EQU $+3:
@@ -649,7 +726,8 @@ BOOTROM:
         
         call    KERNEL_TERM.init
         xor     a                           ; To make sure there's no pending keys
-        ld      (KERNEL.dynamic_data.console_cache), a; We write 0 to the console_cache
+        ld      (KERNEL.dynamic_data.console_head), a; The console queue is empty
+        ld      (KERNEL.dynamic_data.console_tail), a
         
         ret
         
@@ -747,37 +825,158 @@ BIOS_WBOOT:
         
 ;
 ; Returns status in A; 0 if no character is ready, 0FFh if one is.
-; A key found here is kept in console_cache until it is taken.
+; A key found here waits in the console queue until it is taken.
 BIOS_CONST:
-        ld      a, (KERNEL.dynamic_data.console_cache); Is a key already waiting?
-        or      a
+        ld      a, (KERNEL.dynamic_data.console_head)
+        ld      hl, KERNEL.dynamic_data.console_tail
+        cp      (hl)                        ; Is a byte already waiting?
         jp      nz, KERNEL.ret255_in_a      ; ...Yes, still ready
-        call    KERNEL_KEYBOARD.read_new_key; New keypress, 0 if none
-        or      a
+        call    console_scan                ; New keypress into the queue
         jp      z, KERNEL.ret0_in_a         ; ...None, not ready
-        ld      (KERNEL.dynamic_data.console_cache), a; Keep the key for CONIN
         jp      KERNEL.ret255_in_a
 
 ;
 ; Wait until the keyboard is ready to provide a character, and return it in A.
+; Interrupts are on while it waits, so the cursor blinks; BLINK.waiting tells
+; the frame interrupt to leave the keyboard and the queue to this loop.
 BIOS_CONIN:
+        ld      hl, BLINK.waiting
+        ld      (hl), $FF
+        ei                                  ; The cursor blinks while the key is awaited
+.wait:
         call    console_take_key            ; Waiting or new key, 0 if none
         or      a
-        jr      z, BIOS_CONIN               ; ...None, keep waiting
+        jr      z, .wait                    ; ...None, keep waiting
+        di
+        ld      hl, BLINK.waiting
+        ld      (hl), 0
         ret
 
 ;
-; Takes the next console key without waiting: the one CONST found if there is
-; one, else a new keypress. Returns the key in A, or 0 if there is none.
+; Takes the next console byte without waiting: the first in the queue if
+; there is one, else the first of a new keypress. Returns it in A, or 0 if
+; there is none.
 console_take_key:
-        ld      a, (KERNEL.dynamic_data.console_cache); Is a key already waiting?
+        call    console_pop                 ; A byte waiting?
+        ret     nz                          ; ...Yes
+        call    console_scan                ; ...No, scan for a new key
+        ret     z                           ; ...None, A=0
+;
+; Takes the first byte from the console queue, and keeps it in console_last.
+; Returns it in A with NZ, or A=0 with Z when the queue is empty.
+;     Dirties AF, HL
+console_pop:
+        call    console_peek
+        ret     z                           ; ...Empty
+        ld      (KERNEL.dynamic_data.console_last), a
+        ld      a, (KERNEL.dynamic_data.console_head)
+        inc     a
+        and     15
+        ld      (KERNEL.dynamic_data.console_head), a
+        ld      a, (KERNEL.dynamic_data.console_last)
         or      a
-        jp      z, KERNEL_KEYBOARD.read_new_key; ...No, scan for a new one
-        push    af
-        xor     a                           ; ...Yes, take it
-        ld      (KERNEL.dynamic_data.console_cache), a
-        pop     af
         ret
+
+;
+; Reads the first byte in the console queue and leaves it there. Returns it
+; in A with NZ, or A=0 with Z when the queue is empty.
+;     Dirties AF, HL
+console_peek:
+        ld      a, (KERNEL.dynamic_data.console_head)
+        ld      hl, KERNEL.dynamic_data.console_tail
+        cp      (hl)                        ; Empty?
+        jr      z, .empty
+        ld      hl, KERNEL.dynamic_data.console_queue
+        add     hl, a
+        ld      a, (hl)
+        or      a
+        ret
+.empty:
+        xor     a
+        ret
+
+;
+; Puts A at the end of the console queue. When the queue is full, A is lost.
+;     Dirties AF, HL
+console_push:
+        push    bc
+        ld      c, a
+        ld      a, (KERNEL.dynamic_data.console_tail)
+        ld      b, a
+        inc     a
+        and     15
+        ld      hl, KERNEL.dynamic_data.console_head
+        cp      (hl)                        ; Full?
+        jr      z, .full
+        ld      (KERNEL.dynamic_data.console_tail), a
+        ld      a, b
+        ld      hl, KERNEL.dynamic_data.console_queue
+        add     hl, a
+        ld      (hl), c
+.full:
+        pop     bc
+        ret
+
+;
+; Scans for a new key and puts its bytes in the console queue: the key, or
+; for a cursor or PF key its VT100 sequence, ESC [ x or ESC O x (ESC O for
+; the cursor keys while DECCKM is set). Returns NZ for a key, Z for none.
+; The frame interrupt (BLINK.frame) calls it too, while a CP/M program runs.
+;     Dirties AF, BC, DE, HL
+console_scan:
+        call    KERNEL_KEYBOARD.read_new_key; New keypress, 0 if none
+        or      a
+        ret     z                           ; ...None
+        cp      KERNEL_KEYBOARD.KEY_SEQUENCE
+        jr      c, .push                    ; One byte
+        and     $7F                         ; The final byte of the sequence
+        ld      d, a
+        ld      a, KERNEL_KEYBOARD.ESC
+        call    console_push
+        ld      a, d
+        cp      'P'                         ; PF1 to PF4?
+        jr      nc, .ss3                    ; ...Yes, always ESC O
+        ld      a, (KERNEL_TERM.state.cursor_keys)
+        or      a                           ; DECCKM set?
+        ld      a, '['
+        jr      z, .lead                    ; ...No, ESC [
+.ss3:
+        ld      a, 'O'
+.lead:
+        call    console_push
+        ld      a, d
+.push:
+        call    console_push
+        or      1                           ; NZ, a key
+        ret
+
+;
+; Takes the rest of an escape sequence whose ESC has been taken, from the
+; console queue only: [ or O, then parameter and intermediate bytes ($20 to
+; $3F), then the final byte ($40 to $7E). A key or a terminal reply puts its
+; whole sequence in the queue at once. Takes nothing when the next byte does
+; not start a sequence, and stops at a byte outside $20 to $7E or when the
+; queue is empty.
+;     Dirties AF, HL
+console_skip_sequence:
+        call    console_peek
+        ret     z                           ; ...Empty, a lone ESC
+        cp      '['
+        jr      z, .take
+        cp      'O'
+        ret     nz                          ; ...Not a sequence
+.take:
+        call    console_pop                 ; [ or O, or a parameter or intermediate byte
+.next:
+        call    console_peek
+        ret     z                           ; ...Empty, the sequence is cut short
+        cp      $20
+        ret     c                           ; ...A control character, not in the sequence
+        cp      $7F
+        ret     nc                          ; ...Not in the sequence
+        cp      $40
+        jr      c, .take                    ; Parameter or intermediate byte
+        jp      console_pop                 ; The final byte
         
         
 BIOS_CONOUT:
@@ -849,14 +1048,332 @@ BIOS_SECTRAN:
 SECTRAN_string:
         DB "BIOS_SECTRAN", 0
 ;
+; DPM control, BIOS entry 29: DP/M's own functions, the function number in C.
+;   $00  control_exit, end DP/M. Does not return.
+;   $01  control_console, set the console's default colours.
+; Any other number returns A = $FF.
+BIOS_CONTROL:
+        ld      a, c
+        or      a
+        jr      z, control_exit
+        dec     a
+        jr      z, control_console
+        jp      ret255_in_a
+
+;
 ; End DP/M: close every open file and the directory search, then leave
 ; through the dot command's exit path as a normal exit, with no error
 ; report. Does not return.
-BIOS_EXIT:
+control_exit:
         call    KERNEL_BDOS.handle_close_all
         call    KERNEL_BDOS.search_close
         call    enable_esxdos_rom           ; The dot command's RAM at $2000, for its exit path
         jp      @kernel_exit
+
+;
+; D = ink and E = paper (0-7) become the console's default colours
+; (KERNEL_TERM.set_defaults), and go in the [console] section of config.ini
+; in the install folder. The file is made if it is not there; the rest of
+; it stays as it was. Returns A = 0, or A = $FF for a colour past 7, a
+; config.ini that cannot be read or is longer than config_text, or an
+; error writing it.
+;     Dirties AF, BC, DE, HL
+control_console:
+        ld      a, d
+        or      e
+        cp      8
+        jp      nc, ret255_in_a             ; A colour past 7
+        call    KERNEL_TERM.set_defaults
+        call    KERNEL_TERM.clear_border_rows ; Display rows 0 and 31 in the new paper
+        call    config_read
+        jp      c, ret255_in_a              ; The rest of the file could be lost
+        ld      hl, dynamic_data.config_text
+        call    config_section              ; HL = its header line, carry if there is none
+        jr      nc, .replace
+        ld      hl, (dynamic_data.config_end)
+        ld      bc, dynamic_data.config_text
+        or      a
+        sbc     hl, bc
+        add     hl, bc
+        jr      z, .append                  ; No text
+        dec     hl
+        ld      a, (hl)
+        inc     hl
+        cp      KERNEL_KEYBOARD.LF
+        jr      z, .append
+        ld      (hl), KERNEL_KEYBOARD.LF    ; The section starts on a line of its own
+        inc     hl
+        ld      (dynamic_data.config_end), hl
+.append:                                    ; The section goes after all the text
+        ld      d, h
+        ld      e, l
+        jr      .write
+.replace:                                   ; The section goes where the old one was
+        push    hl
+        call    section_end
+        ex      de, hl
+        pop     hl
+.write:                                     ; HL = the end of the text before it, DE = the start of the text after it
+        push    de
+        push    hl
+        call    config_path
+        ld      b, esx_mode_write + esx_mode_creat_trunc
+        ld      a, '*'                      ; This doesn't matter, pathspec overrides it
+        m_kr_esxdos F_OPEN
+        pop     de
+        pop     bc
+        jp      c, ret255_in_a              ; It cannot be made
+        ld      (dynamic_data.config_handle), a
+        xor     a
+        ld      (dynamic_data.config_error), a
+        push    bc
+        ld      hl, dynamic_data.config_text
+        call    config_write                ; The text before the section
+        call    config_new_section
+        ex      de, hl
+        ld      hl, dynamic_data.config_new
+        call    config_write                ; The section
+        pop     hl
+        ld      de, (dynamic_data.config_end)
+        call    config_write                ; The text after it
+        ld      a, (dynamic_data.config_handle)
+        m_kr_esxdos F_CLOSE
+        jp      c, ret255_in_a
+        ld      a, (dynamic_data.config_error)
+        or      a
+        jp      nz, ret255_in_a
+        jp      ret0_in_a
+
+;
+; Write the bytes from HL up to DE to the open file config_handle. An
+; error sets config_error to $FF.
+;     Dirties AF, BC, DE, HL
+config_write:
+        ex      de, hl
+        or      a
+        sbc     hl, de
+        ret     z                           ; Nothing to write
+        ld      b, h
+        ld      c, l
+        ex      de, hl                      ; HL = the bytes, BC = how many
+        ld      a, (dynamic_data.config_handle)
+        m_kr_esxdos F_WRITE
+        ret     nc
+        ld      a, $FF
+        ld      (dynamic_data.config_error), a
+        ret
+
+;
+; working_path = the install path and "config.ini". Returns HL = working_path.
+;     Dirties AF, DE, HL
+config_path:
+        ld      de, config.install_path
+        ld      hl, dynamic_data.working_path
+        call    strcpy
+        ld      de, strings.config_name
+        call    strcpy
+        ld      hl, dynamic_data.working_path
+        ret
+
+;
+; Read config.ini from the install folder into config_text, ending in 0;
+; config_end is the address of the 0. With no file there is no text.
+; Returns carry set if the file cannot be read, with no text, or does not
+; fit in config_text, with its first CONFIG_MAX bytes.
+;     Dirties AF, BC, DE, HL
+config_read:
+        call    config_path
+        ld      b, esx_mode_read + esx_mode_open_exist ; Open read only, if file exists
+        ld      a, '*'                      ; This doesn't matter, pathspec overrides it
+        m_kr_esxdos F_OPEN
+        ld      hl, dynamic_data.config_text
+        ld      (hl), 0                     ; No text yet
+        ld      (dynamic_data.config_end), hl
+        ccf
+        ret     nc                          ; No file: no text, and no error
+        push    af                          ; The handle
+        ld      bc, CONFIG_MAX
+        m_kr_esxdos F_READ                  ; BC = bytes read
+        pop     de                          ; D = the handle
+        jr      c, .error
+        ld      hl, dynamic_data.config_text
+        add     hl, bc                      ; Clears carry
+        ld      (hl), 0
+        ld      (dynamic_data.config_end), hl
+        ld      hl, CONFIG_MAX-1
+        sbc     hl, bc                      ; Carry when it is full: the file may go on
+.close:
+        push    af
+        ld      a, d
+        m_kr_esxdos F_CLOSE
+        pop     af
+        ret
+.error:
+        ld      hl, dynamic_data.config_text
+        ld      (hl), 0                     ; No text
+        scf
+        jr      .close
+
+;
+; The colours in the [console] section of config_text: D = ink and E =
+; paper, from its ink= and paper= lines, each a name from colour_names. A
+; colour that is not there, or not a name, is the default it was.
+;     Dirties AF, BC, HL
+config_colours:
+        ld      a, (KERNEL_TERM.reset_values.ink)
+        ld      d, a
+        ld      a, (KERNEL_TERM.reset_values.paper)
+        ld      e, a
+        ld      hl, dynamic_data.config_text
+        call    config_section
+        ret     c                           ; No [console] section
+.line:
+        call    next_line
+        ld      a, (hl)
+        or      a
+        ret     z                           ; The end of the text
+        cp      '['
+        ret     z                           ; The next section
+        push    hl
+        ld      bc, strings.key_ink
+        call    match_text
+        jr      nz, .paper
+        call    colour_number
+        jr      c, .next
+        ld      d, a
+        jr      .next
+.paper:
+        pop     hl
+        push    hl
+        ld      bc, strings.key_paper
+        call    match_text
+        jr      nz, .next
+        call    colour_number
+        jr      c, .next
+        ld      e, a
+.next:
+        pop     hl
+        jr      .line
+
+;
+; Find the [console] section of the text at HL, which ends in 0. Returns HL
+; = its header line, or carry set if there is none.
+;     Dirties AF, BC, HL
+config_section:
+        ld      a, (hl)
+        or      a
+        scf
+        ret     z                           ; The end of the text
+        push    hl
+        ld      bc, strings.console_section
+        call    match_text
+        pop     hl
+        ret     z                           ; Carry clear
+        call    next_line
+        jr      config_section
+
+;
+; HL = the end of the section whose header line is at HL: the next header
+; line, or the 0 at the end of the text.
+;     Dirties AF, HL
+section_end:
+        call    next_line
+        ld      a, (hl)
+        or      a
+        ret     z
+        cp      '['
+        jr      nz, section_end
+        ret
+
+;
+; HL = the start of the line after the line at HL, or the 0 at the end of
+; the text.
+;     Dirties AF, HL
+next_line:
+        ld      a, (hl)
+        or      a
+        ret     z
+        inc     hl
+        cp      KERNEL_KEYBOARD.LF
+        jr      nz, next_line
+        ret
+
+;
+; Does the text at HL start with the text at BC, which ends in 0? Letters
+; match in either case. Returns Z and HL past it when it does, NZ when not.
+;     Dirties AF, BC, HL
+match_text:
+        ld      a, (bc)
+        or      a
+        ret     z                           ; All of it matched
+        xor     (hl)
+        and     %11011111                   ; The same letter in either case
+        ret     nz
+        inc     bc
+        inc     hl
+        jr      match_text
+
+;
+; The colour named at HL, one of colour_names, followed by a space, a
+; control code or the end of the text. Returns A = the colour (0-7), or
+; carry set if it is not one of them.
+;     Dirties AF, BC
+colour_number:
+        xor     a
+.name:
+        push    af
+        push    hl
+        ld      bc, strings.colour_names
+        add     a, a
+        add     a, a
+        add     a, a
+        add     bc, a
+        call    match_text
+        jr      nz, .other
+        ld      a, (hl)
+        cp      ' '+1
+        jr      nc, .other                  ; A longer word
+        pop     hl
+        pop     af
+        or      a                           ; Carry clear
+        ret
+.other:
+        pop     hl
+        pop     af
+        inc     a
+        cp      8
+        jr      c, .name
+        scf                                 ; Not a colour
+        ret
+
+;
+; Put the [console] section for the default colours in config_new: its
+; header line, then ink= and paper= lines with their names. Returns HL =
+; the end of it.
+;     Dirties AF, DE, HL
+config_new_section:
+        ld      hl, dynamic_data.config_new
+        ld      de, strings.console_section
+        call    strcpy
+        ld      (hl), KERNEL_KEYBOARD.LF
+        inc     hl
+        ld      de, strings.key_ink
+        call    strcpy
+        ld      a, (KERNEL_TERM.reset_values.ink)
+        call    .name
+        ld      de, strings.key_paper
+        call    strcpy
+        ld      a, (KERNEL_TERM.reset_values.paper)
+.name:                                      ; Colour A's name, and the end of the line
+        add     a, a
+        add     a, a
+        add     a, a
+        ld      de, strings.colour_names
+        add     de, a
+        call    strcpy
+        ld      (hl), KERNEL_KEYBOARD.LF
+        inc     hl
+        ret
 
 
 ;
@@ -1095,14 +1612,22 @@ copy_to_userland:
 ; anywhere in userland, so the line is built in readstr.line in the kernel and
 ; copied out when it ends. Input ends on CR or LF, or when mx characters have
 ; been typed.
-;   BS, DEL     rub out the last character
-;   ^X          rub out the whole line, and start again
+;   BS, DEL     rub out the last character, every column it took
+;   ^X          rub out back to the column where the line began, and start
+;               again
 ;   ^U          "#", new line, start again
 ;   ^R          "#", new line, type the line again
 ;   ^E          new line on screen, input carries on
-;   ^C          warm boot, if it is the first character
+;   ^C          warm boot, if it is the first character; ignored later
+;   ^P          ignored
+;   ESC         the escape sequence it starts, from a key or a terminal reply,
+;               is neither stored nor echoed (console_skip_sequence)
 ; ^U and ^R start the new line under the column where the line began.
-; Other control characters are ignored.
+; Other control characters are stored, and echoed as in the CP/M 2.2 BDOS:
+; TAB as spaces to the next column that is a multiple of 8, the others as "^"
+; and the letter (code + $40), so a lone ESC shows "^[". When the last byte
+; taken before the line, by a BREAK check for example, was an ESC, the rest
+; of its sequence is dropped too.
 BDOS_C_READSTR:
         ld      (KERNEL_BDOS.readstr.dest), de
         ex      de, hl                  ; HL = userland buffer
@@ -1113,6 +1638,9 @@ BDOS_C_READSTR:
         ld      (KERNEL_BDOS.readstr.max), a
         ld      a, (KERNEL_TERM.state.console_column)
         ld      (KERNEL_BDOS.readstr.column), a ; Column where the line began
+        ld      a, (KERNEL.dynamic_data.console_last)
+        cp      KERNEL_KEYBOARD.ESC     ; Was the last byte taken an ESC?
+        call    z, console_skip_sequence ; ...Yes, drop the rest of its sequence
 .restart:
         xor     a
         ld      (KERNEL_BDOS.readstr.line), a ; No characters yet
@@ -1132,25 +1660,28 @@ BDOS_C_READSTR:
         cp      KERNEL_KEYBOARD.DEL
         jr      z, .backspace
         cp      KERNEL_KEYBOARD.CTR_X
-        jr      z, .erase_line
+        jp      z, .erase_line
         cp      KERNEL_KEYBOARD.CTR_U
-        jr      z, .new_line
+        jp      z, .new_line
         cp      KERNEL_KEYBOARD.CTR_R
-        jr      z, .retype
+        jp      z, .retype
         cp      KERNEL_KEYBOARD.CTR_E
         jp      z, .physical_eol
         cp      KERNEL_KEYBOARD.CTR_C
         jr      z, .reboot_if_start_of_line
-        cp      32
-        jp      c, .read_to_buffer      ; Other control characters are ignored
+        cp      KERNEL_KEYBOARD.CTR_P
+        jp      z, .read_to_buffer
+        cp      KERNEL_KEYBOARD.ESC
+        jr      z, .escape
 
+.store:
         ld      hl, KERNEL_BDOS.readstr.line
         inc     (hl)                    ; Increase the final-chars-count
         ld      e, (hl)
         ld      d, 0
         add     hl, de                  ; HL = place for this char
         ld      (hl), a                 ; Store the char in the buffer
-        call    KERNEL_TERM.process     ; Echo it
+        call    .echo
         jp      .read_to_buffer
 
 .done:
@@ -1167,6 +1698,20 @@ BDOS_C_READSTR:
         ld      b, 0
         ret
 
+.escape:
+        call    console_peek            ; Does a sequence follow?
+        jr      z, .lone_escape         ; ...No, nothing follows
+        cp      '['
+        jr      z, .sequence
+        cp      'O'
+        jr      z, .sequence
+.lone_escape:
+        ld      a, KERNEL_KEYBOARD.ESC
+        jr      .store
+.sequence:
+        call    console_skip_sequence
+        jp      .read_to_buffer
+
 .reboot_if_start_of_line:
         ld      a, (KERNEL_BDOS.readstr.line)
         or      a
@@ -1182,19 +1727,28 @@ BDOS_C_READSTR:
         ld      a, (hl)                 ; If final-chars is zero we can't go back any more
         or      a
         jp      z, .read_to_buffer
+        ld      b, a
+        call    .columns
+        ld      d, c                    ; D = column after the last character
+        dec     b
+        call    .columns                ; C = column before it
+        ld      hl, KERNEL_BDOS.readstr.line
         dec     (hl)                    ; Decrease final-chars-count
+        ld      a, d
+        sub     c
+        ld      b, a                    ; B = columns it took
+.backspace_column:
         call    .rub_out
+        djnz    .backspace_column
         jp      .read_to_buffer
 
 .erase_line:
-        ld      a, (KERNEL_BDOS.readstr.line)
-        or      a
-        jp      z, .restart
-        ld      b, a
-.erase_char:
+        ld      a, (KERNEL_BDOS.readstr.column)
+        ld      hl, KERNEL_TERM.state.console_column
+        cp      (hl)
+        jp      nc, .restart            ; Back at the column where the line began
         call    .rub_out
-        djnz    .erase_char
-        jp      .restart
+        jr      .erase_line
 
 .new_line:
         call    .hash_newline
@@ -1210,7 +1764,7 @@ BDOS_C_READSTR:
 .retype_char:
         inc     hl
         ld      a, (hl)
-        call    KERNEL_TERM.process
+        call    .echo
         djnz    .retype_char
         jp      .read_to_buffer
 
@@ -1219,6 +1773,63 @@ BDOS_C_READSTR:
         xor     a
         ld      (KERNEL_BDOS.readstr.column), a ; Later new lines start at the margin
         jp      .read_to_buffer
+
+; Echo A: TAB as spaces to the next column that is a multiple of 8, another
+; control character as "^" and the letter, anything else as itself
+.echo:
+        cp      KERNEL_KEYBOARD.TAB
+        jr      z, .echo_tab
+        cp      32
+        jp      nc, KERNEL_TERM.process
+        push    af
+        ld      a, '^'
+        call    KERNEL_TERM.process
+        pop     af
+        or      $40
+        jp      KERNEL_TERM.process
+.echo_tab:
+        push    bc
+        ld      a, (KERNEL_TERM.state.console_column)
+        or      $F8
+        neg                             ; A = 8 - column mod 8
+        ld      b, a
+.echo_space:
+        ld      a, ' '
+        call    KERNEL_TERM.process
+        djnz    .echo_space
+        pop     bc
+        ret
+
+; C = the column after the first B characters of the line as .echo shows
+; them, counted from the column where the line began
+.columns:
+        ld      a, (KERNEL_BDOS.readstr.column)
+        ld      c, a
+        ld      a, b
+        or      a
+        ret     z
+        push    bc
+        ld      hl, KERNEL_BDOS.readstr.line
+.columns_next:
+        inc     hl
+        ld      a, (hl)
+        cp      KERNEL_KEYBOARD.TAB
+        jr      nz, .columns_control
+        ld      a, c
+        or      7                       ; TAB: on to the next multiple of 8
+        ld      c, a
+        jr      .columns_char
+.columns_control:
+        cp      32
+        jr      nc, .columns_char
+        inc     c                       ; Control character: "^" and the letter
+.columns_char:
+        inc     c
+        djnz    .columns_next
+        ld      a, c
+        pop     bc
+        ld      c, a
+        ret
 
 ; Backspace, space, backspace: removes the last character from the screen
 .rub_out:

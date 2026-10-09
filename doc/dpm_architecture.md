@@ -77,8 +77,8 @@ The CP/M (Control Program for Microcomputers) architecture was designed to provi
 	•	No multitasking: CP/M runs a single program at a time.
 	•	Limited memory usage: Restricted by the 64KB memory addressing of the 8080/Z80.
 	•	Minimal file system: Lacks modern features like subdirectories and long filenames.
-	DP/M actively does not support multitasking, and should disable interrupts at startup to prevent any problems with multitasking NextZXOS drivers. 
-	DP/M actively does not support CP/M 3.0 enhanced memory model, for simplicity at this stage, and should disable interrupts at startup to prevent any problems with multitasking NextZXOS drivers.  Multitasking is not considered "potential future enhancements", that is left for the scope of DP/M > 1.0 ;-)
+	DP/M actively does not support multitasking. It runs the Z80 in interrupt mode 2 with the Next's hardware IM2 vectors, and only the ULA frame interrupt is enabled; its handler blinks the cursor. Interrupts are on while a CP/M program runs and while console input waits for a key, and off while the kernel runs. On exit DP/M restores the interrupt NextRegs and sets interrupt mode 1 before it returns to NextZXOS.
+	DP/M actively does not support CP/M 3.0 enhanced memory model, for simplicity at this stage.  Multitasking is not considered "potential future enhancements", that is left for the scope of DP/M > 1.0 ;-)
 
 	 Multitasking and enchanced memory management are not considered "potential future enhancements" for this verion of DP/M, that is left for the scope of DP/M > 1.0 ;-)
 	

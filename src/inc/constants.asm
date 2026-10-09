@@ -290,6 +290,10 @@ DIVMMC_ENTRY_POINTS_0_NR_B8         EQU $B8
 DIVMMC_ENTRY_POINTS_VALID_0_NR_B9   EQU $B9
 DIVMMC_ENTRY_POINTS_TIMING_0_NR_BA  EQU $BA
 DIVMMC_ENTRY_POINTS_1_NR_BB         EQU $BB
+INTERRUPT_CONTROL_NR_C0             EQU $C0     ;IM2 vector offset, stackless NMI, the IM mode (read only), hardware IM2
+INT_EN_0_NR_C4                      EQU $C4     ;Interrupt enables: expansion bus, line, ULA
+INT_EN_1_NR_C5                      EQU $C5     ;Interrupt enables: CTC channels 0-7
+INT_EN_2_NR_C6                      EQU $C6     ;Interrupt enables: UART 0 and 1
 
 DEBUG_LED_CONTROL_NR_FF             EQU $FF     ;Turns debug LEDs on and off on TBBlue implementations that have them.
 

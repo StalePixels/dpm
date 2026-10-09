@@ -18,7 +18,7 @@
 ;    the    total size of the program must not exceed
 ;    2K in order to fit under the BDOS. (Unless you change the CCP_START location!)
 ;    Code must be added to use the Clear Screen command with
-;    your terminal, if it is not VT52 compatible.
+;    your terminal, if it is not VT100 compatible.
 ;    Also, there is a provision for a boot-up command. Place
 ;    the    command to be executed on cold and warm starts at 
 ;    location CBUFF.
@@ -55,8 +55,9 @@
 ;        also, the '>' is not printed until all preprocessing is completed
 ;    N.    The TYPE and LIST Commands mask the MSB of each byte, so that
 ;        files created by editors such as EDIT80 are "printable"
-;    O.    An EXIT Command ends DP/M and returns to NextZXOS, through the
-;        exit entry in DP/M's BIOS jump table (BIOS_EXIT_OFS)
+;    O.    An EXIT Command ends DP/M and returns to NextZXOS, through
+;        function $00 of DPM control in DP/M's BIOS jump table
+;        (BIOS_CONTROL_OFS)
 
 ;    DP/M ASSEMBLY *****
 ;    This file is assembled on its own into CCP.COM, an image of the CCP at
@@ -1222,25 +1223,28 @@ CMD_USER:
         cp      ' '        ; <SP>=ERROR
         jp      Z, INVALID_COMMAND
         call    SETUSR        ; SET SPECIFIED USER
+.restart:
         jp      RESTART_CCP.drive_changed        ; RESTART CCP (NO DEFAULT LOGIN)
         
 
-; Send VT52 escape sequences to clear screen to terminal driver
+; Send VT100 escape sequences to clear screen to terminal driver
 CMD_CLS:    
         ld      hl, CLS_STR
         call    PRINT.string_at_hl
-        jp      RESTART_CCP.drive_changed        ; RESTART CCP (NO DEFAULT LOGIN)
+        jr      CMD_USER.restart                 ; RESTART CCP (NO DEFAULT LOGIN)
 CLS_STR:
-        db      KERNEL_KEYBOARD.ESC, 'H'    ; Move cursor home
-        db      KERNEL_KEYBOARD.ESC, 'J', 0 ; Clear to end of screen
+        db      KERNEL_KEYBOARD.ESC, "[H"   ; Move cursor home
+        db      KERNEL_KEYBOARD.ESC, "[J", 0 ; Clear to end of screen
 
-; End DP/M and return to NextZXOS through DP/M's exit entry in the BIOS jump
-; table, found from the warm boot address at $0001, as EXIT.COM does
+; End DP/M and return to NextZXOS through function $00 of DPM control in the
+; BIOS jump table, found from the warm boot address at $0001, as EXIT.COM does
 CMD_EXIT:
         ld      hl, (REBOOT_A+1)    ; The BIOS warm boot entry
-        ld      de, BIOS_EXIT_OFS
+        ld      de, BIOS_CONTROL_OFS
         add     hl, de
+        ld      c, d                ; D = 0: function $00, exit
         jp      (hl)                ; Does not return
+        ASSERT  BIOS_CONTROL_OFS < 256
         
 ;    
 ;    NOT    CCP-RESIDENT COMMAND -- PROCESS AS TRANSCIENT
@@ -1259,7 +1263,7 @@ RUN_COM:
         ld      (TDRIVE), A         ; Set the new drive letter as the current default drive
         call    SETU0D              ; After a drive change, we default to user 0
         call    LOGIN               ; "Mount" the drive/virtual drive folder
-        jp      RESTART_CCP.drive_changed; Reroll CCP, drive already set, pointer to commandline
+        jr      CMD_USER.restart    ; Reroll CCP, drive already set, pointer to commandline
 .check_error:    
         ld      A, (FCB_FT)         ; Get the FCB Filetype
         cp      ' '                 ; Is it a space? because Transients get called without an extension
