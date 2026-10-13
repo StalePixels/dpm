@@ -83,7 +83,7 @@ ccp:
 # EXIT.COM, the CP/M program that ends DP/M, built into DRIVE_A0 with the
 # other drive A, user 0 programs.
 exit:
-	cd src && $(SJASMPLUS) EXIT.asm
+	cd src/com/exit && $(SJASMPLUS) EXIT.asm
 	$(CP) build/EXIT.COM $(DRIVE_A0)/EXIT.COM
 
 # CONCOLOR.COM, the CP/M program that sets DP/M's default console colours,

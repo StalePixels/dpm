@@ -98,6 +98,10 @@ fat_attr_system                 EQU     $04
 fat_attr_volume                 EQU     $08
 fat_attr_directory              EQU     $10
 
+;; esxDOS error codes
+esx_enodrv                      EQU     11      ; No such drive
+esx_enotdir                     EQU     17      ; Not a directory
+
 esx_seek_set                    EQU     $00
 esx_seek_fwd                    EQU     $01
 esx_seek_bwd                    EQU     $02
@@ -106,6 +110,7 @@ esx_seek_bwd                    EQU     $02
 ; sorting is not possible and a fall back to unsorted mode is made.
 
 IDE_BANK                        EQU     $01bd   ; NextZXOS function to manage memory
+IDE_DOS_MAPPING                 EQU     $00f7   ; NextZXOS function to find what a drive is mapped to
 
 m_esxdos    MACRO   func
         rst     $08

@@ -26,8 +26,14 @@ So, bits from the emulator that I want to keep:
  * The technology - CPemu was a dot command - and the whole of the CP/M
    environment ran within that dot command. I still want to do the entire
    operation as a continiously running dot command, this means that we can
-   cleanly exit back to NextZXOS and have 100% state preservation, as is
-   the "user expectation" with a dot command.
+   cleanly exit back to NextZXOS, as is the "user expectation" with a dot
+   command. At exit DP/M frees every memory page it allocated, and puts
+   back the pages NextZXOS had in MMU slots 2-7, the contents of
+   $4000-$7FFF, the NextRegs it changed, the tilemap palette, the CPU
+   speed, the border colour, the I register, interrupt mode 1 and the
+   interrupt enable state. It does not put back the current directory of
+   a drive that a program changed with DPM control function $02 (see
+   doc/dpm_architecture.md), or the NextReg select port $243B.
 
  * The memory management - CPemu did this with the Next's MMU to keep
    most code out of the linear memory space, and I plan to keep that idea
@@ -36,5 +42,7 @@ So, bits from the emulator that I want to keep:
 
  * The display - CPemu used the tilemap, we're still doing that - and by
    using extra memory from NextZXOS, returned when done, we'll be banking
-   up both ULA areas (one for display, one for tiles) so we can even
-   restore the display once finished.
+   up both 8K halves of $4000-$7FFF ($4000-$5FFF, the ULA screen and system
+   variables, which hold the tile definitions while DP/M runs, and
+   $6000-$7FFF, which holds the tilemap) so we can even restore the
+   display once finished.

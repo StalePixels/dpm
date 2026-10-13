@@ -1,26 +1,18 @@
 # Drive A, user 0
 
-The `.COM` files in `drive/A/0/` are the programs DP/M puts on drive A, user 0. `make install_emu` copies them to `/DPM/A/0` on the SD card, and `make release` puts them in `A/0/` in the release ZIP. This `licences/` folder goes to `/DPM/docs/licences` on the card and in the release ZIP.
+DP/M installs a set of CP/M programs on drive A, user 0. On the SD card they are in the folder `A/0` of the DP/M install folder, `C:/DPM/A/0`. This file and the licence files it names are in `docs/licences` of the same install folder.
 
 ## Source
 
-The programs are built from cpmish, the `cpmish/` submodule of this repository (https://github.com/StalePixels/cpmish, branch `DPM`), at the commit the submodule is pinned to. `git submodule status cpmish` shows that commit.
+`EXIT` and `CONCOLOR` are part of DP/M. Their source is in the DP/M repository, https://github.com/Xalior/dpm.
 
-## Rebuilding
-
-Docker must be running. From the top of this repository:
-
-```
-git submodule update --init cpmish
-make cpmish
-```
-
-`make cpmish` runs `dev/cpmish/build.sh` (Docker) on the `cpmish` submodule into a temporary folder, then replaces the `.COM` files in `drive/A/0/` with the new ones.
+The other programs are built from cpmish, https://github.com/StalePixels/cpmish, branch `DPM`.
 
 ## Licences
 
 | Program | Licence | File |
 |---|---|---|
+| `EXIT`, `CONCOLOR` | GNU LGPL version 3 | `COPYING.lgpl3`, with `COPYING.camelforth` |
 | `COPY`, `DUMP`, `QE`, `STAT`, `SUBMIT` | BSD 2-clause | `COPYING.cpmish` |
 | `ASM` | BSD 2-clause per cpmish's README (the source header says MIT) | `COPYING.cpmish` |
 | `BBCBASIC` | zlib | `COPYING.bbcbasic` |
@@ -30,4 +22,6 @@ make cpmish
 | `ASM80` | Digital Research release | `dr/COPYING.md`, `dr/CPM-LICENSE.txt` (from cpm.z80.de/license.html) |
 | `STARTREK` | Free to redistribute and modify in any way | `COPYING.startrek` (the header of `startrek.c`) |
 
-cpmish as a whole is distributed under the GNU GPL version 2 (`COPYING.gpl2`), because it contains GPL code; each part keeps its own licence. The source of every program is in the `cpmish/` submodule.
+The GNU LGPL version 3 is a set of additional permissions to the GNU GPL version 3. `COPYING.camelforth` is the text of the GNU GPL version 3.
+
+cpmish as a whole is distributed under the GNU GPL version 2 (`COPYING.gpl2`), because it contains GPL code; each part keeps its own licence.

@@ -1020,6 +1020,8 @@ SECTRAN_string:
 ; DPM control, BIOS entry 29: DP/M's own functions, the function number in C.
 ;   $00  control_exit, end DP/M. Does not return.
 ;   $01  control_console, set the console's default colours.
+;   $02  control_fat, change a drive's directory.
+;   $03  control_fat, get a drive's directory.
 ; Any other number returns A = $FF.
 BIOS_CONTROL:
         ld      a, c
@@ -1027,6 +1029,9 @@ BIOS_CONTROL:
         jr      z, control_exit
         dec     a
         jr      z, control_console
+        dec     a
+        cp      CONTROL_GETCWD-CONTROL_CHDIR+1
+        jp      c, control_fat
         jp      ret255_in_a
 
 ;
@@ -1342,6 +1347,132 @@ config_new_section:
         call    strcpy
         ld      (hl), KERNEL_KEYBOARD.LF
         inc     hl
+        ret
+
+;
+; Change or get a drive's directory. B = the drive (0 = A), DE = an address
+; in the TPA, C = the function:
+;   CONTROL_CHDIR   change the drive's directory to the path at DE, ending
+;                   in 0
+;   CONTROL_GETCWD  copy the drive's directory, ending in 0, to the
+;                   263-byte buffer at DE
+; Returns A = 0, or an esxDOS error code: No such drive for a drive that is
+; not mapped. A P3DOS drive (the RAMdisk, or a .P3D or .DSK image) has no
+; directories: its directory is "/", and changing it gives Not a directory.
+; Open files and the directory search are closed first, as their paths are
+; relative to the drive's directory.
+;     Dirties AF, BC, DE, HL and the alternate registers
+CONTROL_CHDIR   EQU     $02
+CONTROL_GETCWD  EQU     $03
+control_fat:
+        push    bc
+        push    de
+        call    KERNEL_BDOS.handle_close_all
+        call    KERNEL_BDOS.search_close
+        pop     de
+        pop     bc
+        call    fat_drive_unit              ; A = unit
+        ld      hl, dynamic_data.working_path
+        jp      c, .no_drive
+        cp      4                           ; The RAMdisk
+        jr      z, .p3dos
+        cp      $FF                         ; A .P3D or .DSK image
+        jr      z, .p3dos
+        ld      a, b
+        add     a, 'A'
+        ld      (hl), a                     ; "d:"
+        inc     hl
+        ld      (hl), ':'
+        inc     hl
+        ld      a, c
+        cp      CONTROL_GETCWD
+        jr      z, .getcwd
+        ex      de, hl                      ; HL = the path in the TPA, DE = past "d:"
+        ld      b, 2                        ; Two pieces: up to 256 characters
+.piece:
+        push    bc
+        push    de
+        ld      de, BDOS.dma_cache
+        ld      bc, BDOS.DMA_CACHE_LEN
+        call    BDOS.copy_userland          ; HL moves on to the next piece
+        pop     de
+        push    hl
+        ld      hl, BDOS.dma_cache
+        ld      bc, BDOS.DMA_CACHE_LEN
+        ldir                                ; DE moves on to the next piece
+        pop     hl
+        pop     bc
+        djnz    .piece
+        xor     a
+        ld      (de), a                     ; A longer path is cut short
+        ld      a, '*'                      ; Not important, the path's drive overrides it
+        ld      hl, dynamic_data.working_path
+        m_kr_esxdos F_CHDIR
+        jp      nc, ret0_in_a
+        ret                                 ; A = the esxDOS error
+.getcwd:
+        ld      (hl), 0
+        push    de                          ; The buffer in the TPA
+        ld      hl, dynamic_data.working_path; The directory goes over the "d:"
+        ld      d, h
+        ld      e, l
+        ld      a, $FF                      ; The drive is the one named at DE
+        m_kr_esxdos F_GETCWD
+        pop     de
+        ret     c                           ; A = the esxDOS error
+.copy_out:
+        ld      hl, dynamic_data.working_path
+        ld      bc, ESXDOS_MAX_PATH_LENGTH+1
+        call    copy_to_userland
+        jp      ret0_in_a
+.p3dos:
+        ld      a, c
+        cp      CONTROL_GETCWD
+        ld      a, esx_enotdir
+        ret     nz                          ; No directory to change to
+        ld      (hl), '/'
+        inc     hl
+        ld      (hl), 0
+        jr      .copy_out
+.no_drive:
+        ld      a, esx_enodrv
+        ret
+
+;
+; Find what drive B is mapped to, with NextZXOS's IDE_DOS_MAPPING. Returns
+; carry set for a drive that is not mapped, else A = the unit: 4 for the
+; RAMdisk, $FF for a .P3D or .DSK image, any other for a partition. The
+; drive's description goes in working_path. M_P3DOS pages RAM bank 7 over
+; $C000-$FFFF for the call, where the BDOS keeps the frame interrupt's
+; vectors, so interrupts stay off across it.
+;     Preserves BC, DE. Dirties AF, HL and the alternate registers
+fat_drive_unit:
+        push    bc
+        push    de
+        ld      a, b
+        add     a, 'A'
+        ld      l, a                        ; The drive letter
+        ld      bc, dynamic_data.working_path; 18 bytes for the description
+        exx                                 ; The parameters go in BC' and HL'
+        ld      de, IDE_DOS_MAPPING
+        ld      c, 7                        ; RAM bank 7 paged in for the call
+        call    KERNEL_TERM.map_graphics_mem; NextZXOS's system variables at $4000
+        call    enable_esxdos_rom
+        ld      (.SMC_kernel_stack), sp
+        ld      sp, dot_stack
+        m_esxdos M_P3DOS
+        di                                  ; Off again, whatever the call left
+.SMC_kernel_stack EQU $+1
+        ld      sp, $AAAA
+        call    disable_esxdos_rom
+        call    KERNEL_TERM.unmap_graphics_mem
+        pop     de
+        pop     bc
+        ccf                                 ; +3DOS sets carry for success
+        ret     c                           ; The call failed
+        scf
+        ret     z                           ; Not mapped
+        or      a                           ; Clear carry, A = the unit
         ret
 
 
