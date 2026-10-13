@@ -862,18 +862,15 @@ console_take_key:
         call    console_scan                ; ...No, scan for a new key
         ret     z                           ; ...None, A=0
 ;
-; Takes the first byte from the console queue, and keeps it in console_last.
-; Returns it in A with NZ, or A=0 with Z when the queue is empty.
+; Takes the first byte from the console queue. Returns it in A with NZ, or
+; A=0 with Z when the queue is empty.
 ;     Dirties AF, HL
 console_pop:
         call    console_peek
         ret     z                           ; ...Empty
-        ld      (KERNEL.dynamic_data.console_last), a
-        ld      a, (KERNEL.dynamic_data.console_head)
-        inc     a
-        and     15
-        ld      (KERNEL.dynamic_data.console_head), a
-        ld      a, (KERNEL.dynamic_data.console_last)
+        ld      hl, KERNEL.dynamic_data.console_head
+        inc     (hl)
+        res     4, (hl)                     ; 16 back to 0, the queue is a ring
         or      a
         ret
 
@@ -949,34 +946,6 @@ console_scan:
         call    console_push
         or      1                           ; NZ, a key
         ret
-
-;
-; Takes the rest of an escape sequence whose ESC has been taken, from the
-; console queue only: [ or O, then parameter and intermediate bytes ($20 to
-; $3F), then the final byte ($40 to $7E). A key or a terminal reply puts its
-; whole sequence in the queue at once. Takes nothing when the next byte does
-; not start a sequence, and stops at a byte outside $20 to $7E or when the
-; queue is empty.
-;     Dirties AF, HL
-console_skip_sequence:
-        call    console_peek
-        ret     z                           ; ...Empty, a lone ESC
-        cp      '['
-        jr      z, .take
-        cp      'O'
-        ret     nz                          ; ...Not a sequence
-.take:
-        call    console_pop                 ; [ or O, or a parameter or intermediate byte
-.next:
-        call    console_peek
-        ret     z                           ; ...Empty, the sequence is cut short
-        cp      $20
-        ret     c                           ; ...A control character, not in the sequence
-        cp      $7F
-        ret     nc                          ; ...Not in the sequence
-        cp      $40
-        jr      c, .take                    ; Parameter or intermediate byte
-        jp      console_pop                 ; The final byte
         
         
 BIOS_CONOUT:
@@ -1620,14 +1589,12 @@ copy_to_userland:
 ;   ^E          new line on screen, input carries on
 ;   ^C          warm boot, if it is the first character; ignored later
 ;   ^P          ignored
-;   ESC         the escape sequence it starts, from a key or a terminal reply,
-;               is neither stored nor echoed (console_skip_sequence)
 ; ^U and ^R start the new line under the column where the line began.
 ; Other control characters are stored, and echoed as in the CP/M 2.2 BDOS:
 ; TAB as spaces to the next column that is a multiple of 8, the others as "^"
-; and the letter (code + $40), so a lone ESC shows "^[". When the last byte
-; taken before the line, by a BREAK check for example, was an ESC, the rest
-; of its sequence is dropped too.
+; and the letter (code + $40), so ESC shows "^[". The bytes of an escape
+; sequence, from a cursor or PF key or a terminal reply, are ordinary
+; characters: a cursor key stores ESC [ D, for example, and shows "^[[D".
 BDOS_C_READSTR:
         ld      (KERNEL_BDOS.readstr.dest), de
         ex      de, hl                  ; HL = userland buffer
@@ -1638,9 +1605,6 @@ BDOS_C_READSTR:
         ld      (KERNEL_BDOS.readstr.max), a
         ld      a, (KERNEL_TERM.state.console_column)
         ld      (KERNEL_BDOS.readstr.column), a ; Column where the line began
-        ld      a, (KERNEL.dynamic_data.console_last)
-        cp      KERNEL_KEYBOARD.ESC     ; Was the last byte taken an ESC?
-        call    z, console_skip_sequence ; ...Yes, drop the rest of its sequence
 .restart:
         xor     a
         ld      (KERNEL_BDOS.readstr.line), a ; No characters yet
@@ -1671,8 +1635,6 @@ BDOS_C_READSTR:
         jr      z, .reboot_if_start_of_line
         cp      KERNEL_KEYBOARD.CTR_P
         jp      z, .read_to_buffer
-        cp      KERNEL_KEYBOARD.ESC
-        jr      z, .escape
 
 .store:
         ld      hl, KERNEL_BDOS.readstr.line
@@ -1697,20 +1659,6 @@ BDOS_C_READSTR:
         ld      a, (KERNEL_BDOS.readstr.line)
         ld      b, 0
         ret
-
-.escape:
-        call    console_peek            ; Does a sequence follow?
-        jr      z, .lone_escape         ; ...No, nothing follows
-        cp      '['
-        jr      z, .sequence
-        cp      'O'
-        jr      z, .sequence
-.lone_escape:
-        ld      a, KERNEL_KEYBOARD.ESC
-        jr      .store
-.sequence:
-        call    console_skip_sequence
-        jp      .read_to_buffer
 
 .reboot_if_start_of_line:
         ld      a, (KERNEL_BDOS.readstr.line)

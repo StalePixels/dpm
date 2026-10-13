@@ -82,8 +82,6 @@ dynamic_data:
         DB  0
 .console_tail                               ; Index of the next byte in; head == tail is empty
         DB  0
-.console_last                               ; The last byte taken from the queue
-        DB  0
 
 .tilemap_palette                            ; NextZXOS's tilemap first palette, put back
         DS  512, $00                        ; at exit: per colour, bits 8-1 then bit 0
