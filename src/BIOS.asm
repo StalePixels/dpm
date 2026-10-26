@@ -15,6 +15,14 @@ m_BIOSStackAndCall MACRO kernel_func
         ld      hl, kernel_func
         jp      internal_KERNEL_call
     ENDM
+
+; The same through bios_call, in fewer bytes and a little slower: for the
+; entries whose speed does not matter.
+m_BIOSCompactCall MACRO kernel_func
+        ld      (BIOS.bios_call.SMC_hl), hl
+        ld      hl, kernel_func
+        jr      bios_call
+    ENDM
     
     ORG     BIOS_A
 bios_start:
@@ -80,7 +88,7 @@ internal_KERNEL_call:
 .internal_KERNEL_func EQU $+1
         call    0xAAAA                      ; Kernel routine to call, was in HL, 0xAAAA is SMC.
 
-; internal_TEARDOWN:
+.teardown:                                  ; Back to the CP/M program
 .SMC_MMU4_userland EQU $+3
         nextreg	MMU4_8000_NR_54, 0xAA
 .SMC_MMU5_userland EQU $+3
@@ -132,53 +140,132 @@ entry_BOOT:                         ;-3: Cold start routine
 entry_WBOOT:                        ; 0: Warm boot - reload command processor
         jr      reentry_BOOTROOM    
         
+; BIOS CONST and CONIN with CON: on BAT: and RDR: on a UART, the way the
+; IOBYTE terminal programs poll the line, answered here in slot 7 without
+; the kernel, and CONST on the keyboard. Anything else, and a CONIN that has
+; to wait, goes on to the kernel (kernel_CONST, kernel_CONIN). The results
+; are those of KERNEL.BIOS_CONST and KERNEL.BIOS_CONIN.
 entry_CONST:                        ; 3: Console status
-        m_BIOSStackAndCall KERNEL.BIOS_CONST
+        di
+        ld      a, (IOBYTE_A)
+        xor     %00000010                   ; CON: BAT: gives 0 in bits 1:0
+        ld      c, a
+        and     %00000011
+        jr      nz, .keyboard               ; Not BAT:
+        ld      a, c
+        call    BLINK.bat_uart.rdr
+        jr      c, kernel_CONST             ; RDR: is not a UART
+        jr      nz, .ready                  ; Bytes in the ring, A = $FF
+        in      a, (c)
+        and     %00000001                   ; A byte in the Rx buffer?
+        jr      z, .ready                   ; ...No, A = 0
+.key:
+        ld      a, $FF
+.ready:
+        ei
+        ret
+; Not CON: BAT:, the keyboard: KERNEL.keyboard_status, with the same results
+; (A, B, HL and the flags), read with only the kernel's slot 5 page mapped.
+.keyboard:
+    ASSERT  (KERNEL.dynamic_data.console_head >> 13) == 5 && (KERNEL.dynamic_data.console_tail >> 13) == 5
+.SMC_MMU5_kernel EQU $+3:
+        nextreg MMU5_A000_NR_55, $AA
+        ld      a, (KERNEL.dynamic_data.console_head)
+        ld      hl, KERNEL.dynamic_data.console_tail
+        cp      (hl)                        ; Is a byte waiting?
+.SMC_MMU5_userland EQU $+3:
+        nextreg MMU5_A000_NR_55, $AA
+        ld      b, 0
+        jr      nz, .key                    ; ...Yes, ready
+        xor     a                           ; ...No, not ready
+        ei
+        ret
 
 entry_CONIN:                        ; 6: Console input
-        m_BIOSStackAndCall KERNEL.BIOS_CONIN
+        di
+        call    BLINK.bat_uart
+        jp      c, kernel_CONIN
+        jr      nz, .ring                   ; Bytes in the ring
+        in      a, (c)
+        rrca                                ; A byte in the Rx buffer?
+        jp      nc, kernel_CONIN            ; ...No, the kernel waits for it
+        inc     b                           ; $143B
+        in      a, (c)
+        ei
+        ret
+.ring:
+        call    BLINK.ring_take             ; The oldest byte
+        ei
+        ret
 
+kernel_CONST:                       ; 3: Console status, after entry_CONST
+        m_BIOSCompactCall KERNEL.BIOS_CONST
+
+kernel_CONIN:                       ; 6: Console input, after entry_CONIN
+        m_BIOSCompactCall KERNEL.BIOS_CONIN
+
+; As m_BIOSStackAndCall and internal_KERNEL_call, with the kernel routine
+; called directly
 entry_CONOUT:                     ; 9: Console output - Write the character in C to the screen
-        m_BIOSStackAndCall KERNEL.BIOS_CONOUT
+        ld      (internal_TEARDOWN.SMC_exitstack), sp
+        ld      sp, stack
+        di                                  ; The kernel runs with interrupts off
+.SMC_MMU4_kernel EQU $+3:
+        nextreg MMU4_8000_NR_54, $AA
+.SMC_MMU5_kernel EQU $+3:
+        nextreg MMU5_A000_NR_55, $AA
+        call    KERNEL.BIOS_CONOUT
+        jp      internal_KERNEL_call.teardown
         
 entry_LIST:                         ;12: Printer output
-        jr entry_CONOUT             ; Just use the console
+        m_BIOSStackAndCall KERNEL.BIOS_LIST
 
 entry_PUNCH:                        ;15: Paper tape punch output
-        jr entry_CONOUT             ; Just use the console
+        m_BIOSStackAndCall KERNEL.BIOS_PUNCH
 
 entry_READER:                       ;18: Paper tape reader input
         m_BIOSStackAndCall KERNEL.BIOS_READER
         
+; The caller's HL in SMC_hl, the kernel routine in HL: on to
+; internal_KERNEL_call as m_BIOSStackAndCall goes
+bios_call:
+        ld      (internal_TEARDOWN.SMC_exitstack), sp
+        ld      sp, stack
+        push    hl
+.SMC_hl EQU $+1
+        ld      hl, $AAAA                   ; The caller's HL, $AAAA replaced by the entry
+        ex      (sp), hl
+        jp      internal_KERNEL_call
+
 entry_HOME:                         ;21: Move disc head to track 0
-        m_BIOSStackAndCall KERNEL.BIOS_HOME
+        m_BIOSCompactCall KERNEL.BIOS_HOME
 
 entry_SELDSK:                       ;24: Select disc drive
-        m_BIOSStackAndCall KERNEL.BIOS_SELDSK
+        m_BIOSCompactCall KERNEL.BIOS_SELDSK
 
 entry_SETTRK:                       ;27: Set track number
-        m_BIOSStackAndCall KERNEL.BIOS_SETTRK
+        m_BIOSCompactCall KERNEL.BIOS_SETTRK
 
 entry_SETSEC:                       ;30: Set sector number
-        m_BIOSStackAndCall KERNEL.BIOS_SETSEC
+        m_BIOSCompactCall KERNEL.BIOS_SETSEC
 
 entry_SETDMA:                       ;33: Set DMA address
-        m_BIOSStackAndCall KERNEL.BIOS_SETDMA
+        m_BIOSCompactCall KERNEL.BIOS_SETDMA
 
 entry_READ:                         ;36: Read a sector
-        m_BIOSStackAndCall KERNEL.BIOS_READ
+        m_BIOSCompactCall KERNEL.BIOS_READ
 
 entry_WRITE:                        ;39: Write a sector
-        m_BIOSStackAndCall KERNEL.BIOS_WRITE
+        m_BIOSCompactCall KERNEL.BIOS_WRITE
 
 entry_LISTST:                       ;42: Status of list device
         m_BIOSStackAndCall KERNEL.BIOS_LISTST
 
 entry_SECTRAN:                      ;45: Sector translation for skewing
-        m_BIOSStackAndCall KERNEL.BIOS_SECTRAN
+        m_BIOSCompactCall KERNEL.BIOS_SECTRAN
         
 entry_CONTROL:                      ;84: DPM control, function in C
-        m_BIOSStackAndCall KERNEL.BIOS_CONTROL
+        m_BIOSCompactCall KERNEL.BIOS_CONTROL
 
 kr_stack:
     DW  0xAAAA                  ; This is what the stack was when the kernel passed control to CP/M

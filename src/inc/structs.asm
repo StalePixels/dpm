@@ -49,6 +49,8 @@ mmu4                BYTE    $4
 mmu5                BYTE    $5
 mmu6                BYTE    $6
 mmu7                BYTE    $7
+serial_esp          BLOCK   RING_PAGES, 0   ; The ESP UART's Rx ring, its pages (KERNEL_SERIAL)
+serial_pi           BLOCK   RING_PAGES, 0   ; The Pi UART's Rx ring, its pages, straight after
 .s_state_end
     ENDS
     

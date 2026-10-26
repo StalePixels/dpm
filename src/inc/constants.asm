@@ -107,6 +107,8 @@ I2C_SCL_P_103B                      EQU $103B   ; i2c bus port (clock) (write on
 I2C_SDA_P_113B                      EQU $113B   ; i2c bus port (data) (read+write)
 UART_TX_P_133B                      EQU $133B   ; UART tx port (read+write)
 UART_RX_P_143B                      EQU $143B   ; UART rx port (read+write)
+UART_SELECT_P_153B                  EQU $153B   ; UART select port (read+write)
+UART_FRAME_P_163B                   EQU $163B   ; UART frame port (read+write)
 
 ZXN_DMA_P_6B                        EQU $6B
     ; -- port $6B = 107 Read+Write (detection bitmask: %xxxx_xxxx_0110_1011)

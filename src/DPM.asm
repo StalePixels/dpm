@@ -102,9 +102,9 @@ backup_state:
 
     ;;check_freemem:
         call    zxn_AvailablePages          ; Number of pages available returned in A
-        ;; Check how many free memory available - error out if less than 96KB
+        ;; Check how many free memory available - error out if less than we allocate below
         and     a                           ; Clear carry flag, leave A intact
-        sub     12                          ; Minus 12, the number of pages we need
+        sub     12+2*RING_PAGES             ; Minus the number of pages we need
         jr      nc, allocate_memory:        ; Sufficent memory found, jump to next stage
         
         xor     a                           ; Wipe A, also wipes carry flag... so set it again
@@ -184,6 +184,15 @@ allocate_memory:                        ; Last 16k, 96k total - save the bank nu
         ld      (mem_exit.SMC_mmu7), a
         nextreg	MMU7_E000_NR_57, a          ; Page in Userland7 (0xE000, to load BIOS+BDOS)
         
+        ;; Allocate RING_PAGES 8k banks for each UART's Rx ring          (2*RING_PAGES)
+        ld      hl, state.serial_esp        ; serial_pi follows it
+        ld      b, 2*RING_PAGES
+.ring_page:
+        call    zxn_AllocatePageInA
+        ld      (hl), a
+        inc     hl
+        djnz    .ring_page
+
         ;; We've finished using NextZXOS, move stack 
         ld      (exit_kernel.SMC_dotstack), sp  ; Stash the stack pointer for return from kernel.
         
@@ -358,6 +367,13 @@ mem_exit:
 .SMC_mmu7 EQU $+1
         ld      e, 0xAA                     ; CP/M "userland" main memory space, part 8 of 8
         call zxn_FreePage
+        ld      hl, state.serial_esp        ; The UARTs' Rx rings, serial_pi after serial_esp
+        ld      b, 2*RING_PAGES
+.ring_page:
+        ld      e, (hl)
+        call zxn_FreePage
+        inc     hl
+        djnz    .ring_page
 
         ;; Page in .SMC_bank3 and copy whatever was originally in the tilemap space
 .SMC_bank3 EQU $+1

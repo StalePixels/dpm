@@ -57,83 +57,43 @@ entry:
 ;   Source FCB can be anywhere in RAM. Should only be called by kernel operations.
 ;   Returns new FCB in DE, all other registers unchanged
 cache_calling_fcb:
-        push    af
-        ; ld      (.SMC_SOURCE_FCB_COPY), de
         ld      (restore_calling_fcb.SMC_ORIGINAL_FCB_COPY), de
         push    bc      ; Save these ...
         push    hl      ; ... and restore later
         ex      de, hl
-        ;; Ensure that all the userland memory is available, incase HL resides behind kernel
-.SMC_MMU4_userland EQU $+3:
-        nextreg	MMU4_8000_NR_54, 0xAA
-.SMC_MMU5_userland EQU $+3:
-        nextreg	MMU5_A000_NR_55, 0xAA
-; .SMC_SOURCE_FCB_COPY EQU $+1
-;         ld      hl, (0xAAAA)                ; SMC copy from    
         ld      de, fcb_cache               ; Copy To
         ld      bc, 36                      ; Length of Copy
-        ldir                                ; ldi repeat. Go.
-        ;; Restore kernel
-.SMC_MMU4_kernel EQU $+3:
-        nextreg	MMU4_8000_NR_54, 0xAA
-.SMC_MMU5_kernel EQU $+3:
-        nextreg	MMU5_A000_NR_55, 0xAA
-        ;; And the saved registers
+        call    copy_userland
         pop     hl
         pop     bc
         ld      de, fcb_cache               ; Leave DE pointing at new FCB in BDOS
-        pop     af
         ret
 
 ; Copy FCB from cache in BDOS to address on stack
 ;   Source FCB can be anywhere in RAM. Should only be called while kernel is paged in.
 restore_calling_fcb:
-        push     af
         push    de
         push    bc
-        ;; Ensure that all the userland memory is available, incase HL resides behind kernel
-.SMC_MMU4_userland EQU $+3:
-        nextreg	MMU4_8000_NR_54, 0xAA
-.SMC_MMU5_userland EQU $+3:
-        nextreg	MMU5_A000_NR_55, 0xAA
         ld      hl, fcb_cache               ; Copy from
 .SMC_ORIGINAL_FCB_COPY EQU $+1
         ld      de, 0xAAAA                ; SMC copy from    
         ld      bc, 36                      ; Length of Copy
-        ldir                                ; ldi repeat. Go.
-        ;; Restore kernel
-.SMC_MMU4_kernel EQU $+3:
-        nextreg	MMU4_8000_NR_54, 0xAA
-.SMC_MMU5_kernel EQU $+3:
-        nextreg	MMU5_A000_NR_55, 0xAA
+        call    copy_userland
         pop     bc
         pop     de
-        pop     af
         ret
 
 ;
 ; Copy DMA cache to DMA address
 copy_dma_out_kernel:
-        push    af
         push    de
         push    bc
         ld      de, (KERNEL_BDOS.dma_address) ; Copy To, read while the kernel is paged in
-        ;; Ensure that all the userland memory is available, incase DE resides behind kernel
-.SMC_MMU4_userland EQU $+3:
-        nextreg	MMU4_8000_NR_54, 0xAA
-.SMC_MMU5_userland EQU $+3:
-        nextreg	MMU5_A000_NR_55, 0xAA
         ld      hl, dma_cache               ; Copy From
         ld      bc, 128                     ; Length of Copy
-        ldir                                ; ldi repeat. Go.
-        ;; Restore kernel
-.SMC_MMU4_kernel EQU $+3:
-        nextreg	MMU4_8000_NR_54, 0xAA
-.SMC_MMU5_kernel EQU $+3:
-        nextreg	MMU5_A000_NR_55, 0xAA
+        call    copy_userland
         pop     bc
         pop     de
-        pop     af
         ret
 
 ; Copy DMA address to DMA cache
@@ -141,19 +101,9 @@ copy_dma_in_kernel:
         push    de
         push    bc
         ld      hl, (KERNEL_BDOS.dma_address) ; Copy From, read while the kernel is paged in
-        ;; Ensure that all the userland memory is available, incase HL resides behind kernel
-.SMC_MMU4_userland EQU $+3:
-        nextreg	MMU4_8000_NR_54, 0xAA
-.SMC_MMU5_userland EQU $+3:
-        nextreg	MMU5_A000_NR_55, 0xAA
         ld      de, dma_cache               ; Copy To
         ld      bc, 128                     ; Length of Copy
-        ldir                                ; ldi repeat. Go.
-        ;; Restore kernel
-.SMC_MMU4_kernel EQU $+3:
-        nextreg	MMU4_8000_NR_54, 0xAA
-.SMC_MMU5_kernel EQU $+3:
-        nextreg	MMU5_A000_NR_55, 0xAA
+        call    copy_userland
         pop     bc
         pop     de
         ret
@@ -244,21 +194,27 @@ diskalloc:
 
 
 ;-----------------------------------------------------------------------------
-; The frame interrupt: type-ahead and the cursor blink. DP/M runs the Z80 in
-; IM 2 with the Next's hardware IM2 vectors (NextReg $C0 bit 0), and only the
-; ULA frame interrupt enabled (NextReg $C4). Interrupts are on while a CP/M
-; program runs and while the BIOS waits for a key, and off while the kernel
-; runs. The vectors and the routine are here because slot 7 holds this page
-; in every mapping.
+; The interrupts: the frame interrupt, for type-ahead and the cursor blink,
+; and the two UART Rx interrupts, which empty a UART's Rx buffer into its
+; ring. DP/M runs the Z80 in IM 2 with the Next's hardware IM2 vectors
+; (NextReg $C0 bit 0), with the ULA frame interrupt (NextReg $C4) and the
+; UARTs' Rx near full interrupts (NextReg $C6) enabled. Interrupts are on
+; while a CP/M program runs and while the BIOS waits for a key or a UART,
+; and off while the kernel runs. The vectors and the routines are here
+; because slot 7 holds this page in every mapping.
 ;-----------------------------------------------------------------------------
     MODULE  BLINK
 frames          EQU     25                  ; Frames between flips: half a second at 50 Hz
 
 ; I is the table's page and NextReg $C0 bits 7:5 its offset in the page.
-; Vector n is at 2n; vector 11 is the ULA frame interrupt.
+; Vector n is at 2n; vector 1 is the ESP's UART Rx, 2 the Pi's, 11 the ULA
+; frame interrupt.
     ALIGN   32
 vectors:
-        DUP     11
+        DW      ignore
+        DW      esp_rx
+        DW      pi_rx
+        DUP     8
         DW      ignore
         EDUP
         DW      frame
@@ -271,9 +227,10 @@ vectors:
 ; bytes in the console queue (KERNEL.console_scan), so a key pressed while
 ; the program is busy waits there until it is read. The kernel goes into
 ; slots 4 and 5 for the scan, and the userland pages go back after. While
-; BIOS_CONIN waits (waiting is not 0) the kernel is mapped and scans the
-; keyboard itself, so the keyboard state and the queue are left alone: the
-; kernel touches them only with interrupts off or in that wait.
+; the kernel waits for a key or a UART (waiting is not 0) the kernel is
+; mapped and scans the keyboard itself, so the keyboard state and the queue
+; are left alone: the kernel touches them only with interrupts off or in
+; that wait.
 ; Every frames frames, flip the reverse bit of the cursor's cell, with bank
 ; 5 in slots 2 and 3, and the userland pages back after.
 ; The pages change with NEXTREG, which leaves the NextReg select port $243B
@@ -285,7 +242,7 @@ frame:
         push    af
         push    hl
         ld      a, (waiting)
-        or      a                           ; Is BIOS_CONIN waiting?
+        or      a                           ; Is the kernel waiting?
         jr      nz, .blink                  ; ...Yes, it scans the keyboard
         push    bc
         push    de
@@ -326,11 +283,222 @@ ignore:
         ei
         reti
 
+; A UART's Rx interrupt: move every byte in its Rx buffer to the end of its
+; ring (see esp_ring). With the ring full, the byte is read and dropped, and
+; dropped is set. The ring's pages go into slot 6 for this and the userland
+; page back after; while interrupts are on, slot 6 always holds userland.
+; Port $153B is put back as it was, so the interrupted code keeps the UART
+; it had selected. The routine runs on the frame interrupt's stack.
+esp_rx:
+        ld      (interrupted_sp), sp
+        ld      sp, stack
+        push    af
+        push    ix
+        ld      ix, esp_ring
+        ld      a, %00000000                ; $153B: the ESP
+        jr      rx
+pi_rx:
+        ld      (interrupted_sp), sp
+        ld      sp, stack
+        push    af
+        push    ix
+        ld      ix, pi_ring
+        ld      a, %01000000                ; $153B: the Pi
+rx:
+        push    bc
+        push    de
+        push    hl
+        ld      bc, $153B                   ; UART select
+        ld      e, a
+        in      a, (c)
+        and     %01000000
+        push    af                          ; The UART selected as found
+        out     (c), e
+        ld      e, (ix+0)
+        ld      d, (ix+1)                   ; DE = head
+        ld      l, (ix+2)
+        ld      h, (ix+3)                   ; HL = tail, where the next byte goes
+.next:
+        ld      b, $13                      ; $133B, status
+        in      a, (c)
+        rrca                                ; A byte waiting?
+        jr      nc, .empty                  ; ...No
+        push    hl
+        ld      a, h
+        rlca
+        rlca
+        rlca
+        and     RING_PAGES-1                ; The page the tail is in, tail bits 15:13
+        add     a, esp_ring.pages-esp_ring
+        push    ix
+        pop     hl
+        add     hl, a
+        ld      a, (hl)
+        nextreg MMU6_C000_NR_56, a
+        pop     hl
+        push    hl
+        ld      a, h
+        and     $1F
+        or      $C0                         ; Its address in slot 6
+        ld      h, a
+        inc     b                           ; $143B
+        in      a, (c)
+        ld      (hl), a                     ; The tail is free whether the ring is full or not
+        pop     hl
+        inc     hl                          ; The next tail, round the ring
+        ld      a, l
+        cp      e
+        jr      nz, .next
+        ld      a, h
+        cp      d
+        jr      nz, .next
+        dec     hl                          ; Full: the byte is dropped
+        ld      a, $FF
+        ld      (dropped), a
+        jr      .next
+.empty:
+        ld      (ix+2), l                   ; The new tail
+        ld      (ix+3), h
+.SMC_MMU6 EQU $+3:
+        nextreg MMU6_C000_NR_56, $AA        ; Userland, $AA replaced at setup
+        pop     af
+        ld      b, $15                      ; $153B
+        out     (c), a                      ; The UART selected as it was
+        pop     hl
+        pop     de
+        pop     bc
+        pop     ix
+        pop     af
+        ld      sp, (interrupted_sp)
+        ei
+        reti
+
+; Each UART's ring is 64K in RING_PAGES 8K pages of its own: head, the
+; oldest byte, and tail, where the next byte goes, both offsets in the ring,
+; 0 to $FFFF, and equal when the ring is empty; then the page numbers, set
+; at setup. Offset n is in page n >> 13, at $C000 + (n AND $1FFF) with that
+; page in slot 6. The interrupt moves the tail and the kernel the head.
+    ASSERT  RING_PAGES == 8                 ; 64K: the offsets wrap round with 16-bit arithmetic
+esp_ring:
+        dw      0, 0
+.pages:
+        ds      RING_PAGES, 0
+pi_ring:
+        dw      0, 0
+.pages:
+        ds      RING_PAGES, 0
+dropped:                                    ; $FF once a full ring has dropped a byte
+        db      0
+ring:                                       ; The ring of the UART KERNEL_SERIAL.select chose
+        dw      pi_ring
+
+; Z if the ring at HL is empty, else NZ.
+;     Dirties AF, HL
+ring_empty:
+        ld      a, (hl)
+        inc     hl
+        inc     hl
+        cp      (hl)                        ; Head and tail, low bytes
+        ret     nz
+        dec     hl
+        ld      a, (hl)
+        inc     hl
+        inc     hl
+        cp      (hl)                        ; High bytes
+        ret
+
+; Takes the oldest byte from the selected UART's ring (ring). Returns NC
+; with the byte in A, or C if the ring is empty. Runs with interrupts off,
+; which keeps the Rx interrupts out of the ring meanwhile.
+;     Dirties AF, BC, DE, HL
+ring_take:
+        ld      hl, (ring)
+        call    ring_empty
+        scf
+        ret     z                           ; Empty
+        ld      hl, (ring)
+        ld      e, (hl)
+        inc     hl
+        ld      d, (hl)                     ; DE = head
+        ld      a, d
+        rlca
+        rlca
+        rlca
+        and     RING_PAGES-1                ; The page the head is in, head bits 15:13
+        add     a, esp_ring.pages-esp_ring-1
+        add     hl, a
+        ld      a, (hl)
+        nextreg MMU6_C000_NR_56, a
+        ld      a, d
+        and     $1F
+        or      $C0                         ; Its address in slot 6
+        ld      h, a
+        ld      l, e
+        ld      c, (hl)                     ; The byte
+.SMC_MMU6 EQU $+3:
+        nextreg MMU6_C000_NR_56, $AA        ; Userland, $AA replaced at setup
+        inc     de                          ; The next head, round the ring
+        ld      hl, (ring)
+        ld      (hl), e
+        inc     hl
+        ld      (hl), d
+        ld      a, c
+        or      a                           ; NC
+        ret
+
+; With CON: on BAT: and RDR: on the ESP (PTR:) or the Pi (UR1:), selects
+; that UART and its ring as KERNEL_SERIAL.select does and returns NC, BC =
+; $133B, and Z with A = 0 if the ring is empty or NZ with A = $FF if not.
+; Otherwise returns C. C is the IOBYTE XOR 2 on return. bat_uart.rdr is the
+; same with that already in A and C, and CON: on BAT:.
+;     Dirties AF, BC, HL
+bat_uart:
+        ld      a, (IOBYTE_A)
+        xor     %00000010                   ; CON: BAT: gives 0 in bits 1:0
+        ld      c, a
+.rdr:
+        and     %00001111                   ; CON: and RDR:
+        cp      %00000100                   ; BAT: and PTR:, the ESP
+        jr      nz, .pi
+        ld      hl, esp_ring
+        xor     a                           ; $153B: the ESP
+        jr      .select
+.pi:
+        cp      %00001000                   ; BAT: and UR1:, the Pi
+        jr      nz, .other
+        ld      hl, pi_ring
+        ld      a, %01000000                ; $153B: the Pi
+        jr      .select
+.other:                                     ; Not BAT:, or RDR: on TTY: or UR2:
+        scf
+        ret
+.select:
+        ld      bc, $153B
+        out     (c), a
+        ld      (ring), hl
+        ld      b, $13                      ; $133B
+        ld      a, (hl)                     ; As ring_empty
+        inc     hl
+        inc     hl
+        cp      (hl)                        ; Head and tail, low bytes
+        jr      nz, .bytes
+        dec     hl
+        ld      a, (hl)
+        inc     hl
+        inc     hl
+        cp      (hl)                        ; High bytes
+        jr      nz, .bytes
+        ld      a, 0                        ; Empty: Z, NC
+        ret
+.bytes:
+        or      $FF                         ; NZ, NC
+        ret
+
 count:                                      ; Frames to the next flip
         db      frames
 cell:                                       ; The cursor's attribute byte, 0 for no cursor
         dw      0
-waiting:                                    ; Not 0 while BIOS_CONIN waits for a key
+waiting:                                    ; Not 0 while the kernel waits for a key or a UART
         db      0
 interrupted_sp:                             ; The interrupted program's stack pointer
         dw      0

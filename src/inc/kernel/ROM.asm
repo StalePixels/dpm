@@ -81,7 +81,16 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      (exit.SMC_int_en_1), a
         m_NextRegRead_c INT_EN_2_NR_C6
         ld      (exit.SMC_int_en_2), a
-        
+        m_NextRegRead_c PI_PERIPHERALS_ENABLE_NR_A0; Read the Pi GPIO functions
+        ld      (exit.SMC_pi_peripherals), a; Save them
+        m_NextRegRead_c PERIPHERAL_2_NR_06  ; Read the NMI button enables
+        ld      (exit.SMC_peripheral_2), a  ; Save them
+        and     %11100111                   ; No NMI from the DRIVE or M1 button while DP/M runs
+        nextreg PERIPHERAL_2_NR_06, a
+        ld      bc, UART_SELECT_P_153B      ; Read the UART select
+        in      a, (c)
+        ld      (exit.SMC_uart_select), a   ; Save it
+
         nextreg PALETTE_CONTROL_NR_43, 0x30 ; Tilemap first palette
         ld      hl, dynamic_data.tilemap_palette
         ld      e, 0                        ; Every colour, all 9 bits ($41 reads bits 8-1, $44 bit 0)
@@ -304,53 +313,55 @@ setup:                                   ; DPM starting up - initialise hardware
         
         ld      a, (KERNEL.dynamic_data.state.mmu3)         ; Get MMU2(userland2) and patch the following
         ld      (KERNEL_TERM.unmap_graphics_mem.SMC_MMU3), a
+    IF DPM_DEBUG == 0
+        ld      (KERNEL_TERM.process.SMC_MMU3), a
+    ENDIF
         ld      (BLINK.frame.SMC_MMU3), a
         
         ld      a, (KERNEL.dynamic_data.state.mmu4)         ; Get MMU3(userland3) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU4_userland), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_userland), a
         ld      (BDOS.entry.SMC_MMU4_userland), a
-        ld      (BDOS.cache_calling_fcb.SMC_MMU4_userland), a
-        ld      (BDOS.restore_calling_fcb.SMC_MMU4_userland), a
-        ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_userland), a
-        ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_userland), a
         ld      (BDOS.copy_userland.SMC_MMU4_userland), a
         ld      (BLINK.frame.SMC_MMU4_userland), a
         
         ld      a, (KERNEL.dynamic_data.state.mmu5)         ; Get MMU4(userland5) and patch the following
         ld      (BIOS.entry_BOOTROM.SMC_MMU5_userland), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU5_userland), a
+        ld      (BIOS.entry_CONST.SMC_MMU5_userland), a
         ld      (BDOS.entry.SMC_MMU5_userland), a
-        ld      (BDOS.cache_calling_fcb.SMC_MMU5_userland), a
-        ld      (BDOS.restore_calling_fcb.SMC_MMU5_userland), a
-        ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_userland), a
-        ld      (BDOS.copy_dma_in_kernel.SMC_MMU5_userland), a
         ld      (BDOS.copy_userland.SMC_MMU5_userland), a
         ld      (BLINK.frame.SMC_MMU5_userland), a
         
-        ;ld      a, (KERNEL.dynamic_data.state.mmu6)         ; Get MMU6(userland6) and patch the following
+        ld      a, (KERNEL.dynamic_data.state.mmu6)         ; Get MMU6(userland6) and patch the following
+        ld      (BLINK.rx.SMC_MMU6), a
+        ld      (BLINK.ring_take.SMC_MMU6), a
+
+        ld      hl, KERNEL.dynamic_data.state.serial_esp    ; The UARTs' ring pages
+        ld      de, BLINK.esp_ring.pages
+        ld      bc, RING_PAGES
+        ldir
+        ld      hl, KERNEL.dynamic_data.state.serial_pi
+        ld      de, BLINK.pi_ring.pages
+        ld      bc, RING_PAGES
+        ldir
         
         ;ld      a, (KERNEL.dynamic_data.state.mmu7)         ; Get MMU7(userland7) and patch the following
         
         ld      a, (KERNEL.dynamic_data.state.kernel0)      ; Get MMU3(kernel0) and patch the following
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU4_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU4_kernel), a
+        ld      (BIOS.entry_CONOUT.SMC_MMU4_kernel), a
         ld      (BDOS.entry.SMC_MMU4_kernel), a
-        ld      (BDOS.cache_calling_fcb.SMC_MMU4_kernel), a
-        ld      (BDOS.restore_calling_fcb.SMC_MMU4_kernel), a
-        ld      (BDOS.copy_dma_out_kernel.SMC_MMU4_kernel), a
-        ld      (BDOS.copy_dma_in_kernel.SMC_MMU4_kernel), a
         ld      (BDOS.copy_userland.SMC_MMU4_kernel), a
         ld      (BLINK.frame.SMC_MMU4_kernel), a
         
         ld      a, (KERNEL.dynamic_data.state.kernel1)      ; Get MMU4(kernel1) and patch the following
         ld      (BIOS.reentry_BOOTROOM.SMC_MMU5_kernel), a
         ld      (BIOS.internal_KERNEL_call.SMC_MMU5_kernel), a
+        ld      (BIOS.entry_CONOUT.SMC_MMU5_kernel), a
+        ld      (BIOS.entry_CONST.SMC_MMU5_kernel), a
         ld      (BDOS.entry.SMC_MMU5_kernel), a
-        ld      (BDOS.cache_calling_fcb.SMC_MMU5_kernel), a
-        ld      (BDOS.restore_calling_fcb.SMC_MMU5_kernel), a
-        ld      (BDOS.copy_dma_out_kernel.SMC_MMU5_kernel), a
-        ld      (BDOS.copy_dma_in_kernel.SMC_MMU5_kernel), a
         ld      (BDOS.copy_userland.SMC_MMU5_kernel), a
         ld      (BLINK.frame.SMC_MMU5_kernel), a
         
@@ -438,7 +449,9 @@ setup:                                   ; DPM starting up - initialise hardware
         nextreg INT_EN_0_NR_C4, %00000001   ; ULA frame interrupt only
         nextreg INT_EN_1_NR_C5, 0
         nextreg INT_EN_2_NR_C6, 0
-        
+
+        call    KERNEL_SERIAL.setup         ; Both UARTs at 115,200 baud
+
         ld          (BIOS.kr_stack), sp ; Tell the BIOS where the kernel stack currently is
         
         ;; Print the bootROM banner
@@ -451,8 +464,9 @@ setup:                                   ; DPM starting up - initialise hardware
         ld      a, (dynamic_data.state.mmu1)
         nextreg	MMU1_2000_NR_51, a          ; Page in kernel0 (0x8000)
         call    page_zero_jumps
+        ld      a, %10010101            ; IOBYTE: LST: LPT:, PUN: PTP:, RDR: PTR:, CON: CRT:
+        ld      (IOBYTE_A), a
         xor     a
-        ld      (IOBYTE_A), a           ; IOBYTE
         ld      (USERDRIVE_A), a        ; User Number in Top Nybble, Disk in Low Nybble
         
 .setup_exit
@@ -513,7 +527,11 @@ exit:                                    ; DPM exiting - safely shut down the VM
         nextreg INT_EN_1_NR_C5, 0xAA
 .SMC_int_en_2 EQU $+3:
         nextreg INT_EN_2_NR_C6, 0xAA
-        
+.SMC_pi_peripherals EQU $+3:
+        nextreg PI_PERIPHERALS_ENABLE_NR_A0, 0xAA; Restore the Pi GPIO functions
+.SMC_peripheral_2 EQU $+3:
+        nextreg PERIPHERAL_2_NR_06, 0xAA    ; Restore the NMI button enables
+
         im      1                           ; NextZXOS runs in IM 1, so a dot command returns to IM 1
         push    af : push bc : push hl      ; A and the carry flag carry the exit state
         nextreg     PALETTE_CONTROL_NR_43, 0x30; Tilemap primary palette, index moves on after each colour
@@ -528,6 +546,10 @@ exit:                                    ; DPM exiting - safely shut down the VM
         nextreg     PALETTE_VALUE_9BIT_NR_44, a  ; Bit 0
         inc     hl
         djnz    .restore_palette
+        ld      bc, UART_SELECT_P_153B
+.SMC_uart_select EQU $+1:
+        ld      a, 0xAA
+        out     (c), a                      ; Restore the UART select
         pop     hl : pop bc : pop af
 .SMC_palette_ctrl EQU $+3:
         nextreg     PALETTE_CONTROL_NR_43, 0xAA; Restore palette control
@@ -824,22 +846,37 @@ BIOS_WBOOT:
         ret
         
 ;
-; Returns status in A; 0 if no character is ready, 0FFh if one is.
-; A key found here waits in the console queue until it is taken.
+; Returns status in A; 0 if no character is ready, 0FFh if one is. With
+; CON: on BAT: it is the status of the RDR: device (reader_status).
 BIOS_CONST:
+        ld      a, (IOBYTE_A)
+        and     %00000011
+        cp      2                           ; CON: BAT:?
+        jp      z, reader_status            ; ...Yes, the RDR: device
+;
+; Returns status in A; 0 if no key is ready, 0FFh if one is. It reads only
+; the console queue: the frame interrupt scans the keyboard into it while a
+; CP/M program runs.
+keyboard_status:
         ld      a, (KERNEL.dynamic_data.console_head)
         ld      hl, KERNEL.dynamic_data.console_tail
-        cp      (hl)                        ; Is a byte already waiting?
-        jp      nz, KERNEL.ret255_in_a      ; ...Yes, still ready
-        call    console_scan                ; New keypress into the queue
-        jp      z, KERNEL.ret0_in_a         ; ...None, not ready
-        jp      KERNEL.ret255_in_a
+        cp      (hl)                        ; Is a byte waiting?
+        jp      nz, KERNEL.ret255_in_a      ; ...Yes, ready
+        jp      KERNEL.ret0_in_a            ; ...No, not ready
 
+;
+; Waits for a character from the CON: device and returns it in A: a key, or
+; with CON: on BAT: a byte from the RDR: device (BIOS_READER).
+BIOS_CONIN:
+        ld      a, (IOBYTE_A)
+        and     %00000011
+        cp      2                           ; CON: BAT:?
+        jp      z, BIOS_READER              ; ...Yes, the RDR: device
 ;
 ; Wait until the keyboard is ready to provide a character, and return it in A.
 ; Interrupts are on while it waits, so the cursor blinks; BLINK.waiting tells
 ; the frame interrupt to leave the keyboard and the queue to this loop.
-BIOS_CONIN:
+keyboard_in:
         ld      hl, BLINK.waiting
         ld      (hl), $FF
         ei                                  ; The cursor blinks while the key is awaited
@@ -948,28 +985,146 @@ console_scan:
         ret
         
         
+;
+; Console output: the character in C goes to the CON: device (console_out).
 BIOS_CONOUT:
         push    af
+        ld      a, (IOBYTE_A)
+        and     %00000011
+        cp      2                           ; CON: BAT:?
         ld      a, c
-.print_char_a
+        jr      z, .bat                     ; ...Yes, console_out sends it to LST:
         call    KERNEL_TERM.process
         pop     af
         ret
+.bat:
+        call    console_out
+        pop     af
+        ret
+
+;
+; Console output: the character in A goes to the CON: device, the terminal,
+; or with CON: on BAT: the LST: device (BIOS_LIST). TTY:, CRT: and UC1: are
+; the terminal.
+;     Preserves every register, as KERNEL_TERM.process does
+console_out:
+        push    af
+        ld      a, (IOBYTE_A)
+        and     %00000011
+        cp      2                           ; CON: BAT:?
+        jr      z, .list                    ; ...Yes, the LST: device
+        pop     af
+        jp      KERNEL_TERM.process
+.list:
+        pop     af
+        push    af : push bc : push de : push hl
+        ld      c, a
+        call    BIOS_LIST
+        pop     hl : pop de : pop bc : pop af
+        ret
+
+;
+; Takes the next CON: byte without waiting: console_take_key, or with CON:
+; on BAT: the RDR: device's byte if it has one waiting. Returns it in A, or
+; 0 if there is none.
+;     Dirties AF, BC, DE, HL
+console_get:
+        ld      a, (IOBYTE_A)
+        and     %00000011
+        cp      2                           ; CON: BAT:?
+        jp      nz, console_take_key        ; ...No, the keyboard
+        call    reader_status
+        or      a
+        ret     z                           ; Nothing waiting
+        jp      BIOS_READER
         
+;
+; List output: the character in C goes to the LST: device (lst_select).
+;     Dirties AF, BC, DE, HL
 BIOS_LIST:
-        m_kr_unimplimented LIST_string
-LIST_string:
-        DB "BIOS_LIST", 0
+        call    lst_select
+        ld      a, c
+        jp      z, KERNEL_TERM.process      ; The console
+        jp      KERNEL_SERIAL.send
+
+;
+; Selects the LST: device, IOBYTE bits 7:6. Returns Z for the console (TTY:
+; or CRT:), or NZ with the UART selected (LPT: the Pi, UL1: the ESP).
+;     Dirties AF
+lst_select:
+        ld      a, (IOBYTE_A)
+        bit     7, a
+        ret     z                           ; TTY: or CRT:, the console
+        and     %01000000
+        xor     %01000000                   ; LPT: the Pi, UL1: the ESP
+.uart:
+        push    bc
+        call    KERNEL_SERIAL.select
+        pop     bc
+        or      1                           ; NZ, a UART
+        ret
         
+;
+; Punch output: the character in C goes to the PUN: device (rdr_pun_select).
+;     Dirties AF, BC, DE, HL
 BIOS_PUNCH:
-        m_kr_unimplimented PUNCH_string
-PUNCH_string:
-        DB "BIOS_PUNCH", 0
-        
+        ld      a, (IOBYTE_A)
+        rrca
+        rrca
+        rrca
+        rrca                                ; PUN:, IOBYTE bits 5:4
+        call    rdr_pun_select
+        ld      a, c
+        jp      z, KERNEL_TERM.process      ; The console
+        ret     c                           ; No device, the character is discarded
+        jp      KERNEL_SERIAL.send
+
+;
+; Reader input: waits for a byte from the RDR: device (rdr_pun_select) and
+; returns it in A. With no device it returns ^Z ($1A), the end of a text
+; file, at once.
+;     Dirties AF, BC, DE, HL
 BIOS_READER:
-        m_kr_unimplimented READER_string
-READER_string:
-        DB "BIOS_READER", 0
+        ld      a, (IOBYTE_A)
+        rrca
+        rrca                                ; RDR:, IOBYTE bits 3:2
+        call    rdr_pun_select
+        jp      z, keyboard_in              ; The console
+        ld      a, $1A
+        ret     c                           ; No device, ^Z
+        jp      KERNEL_SERIAL.receive
+
+;
+; Returns A = $FF if the RDR: device (rdr_pun_select) has a byte waiting,
+; else 0. No device has none.
+;     Dirties AF, BC, DE, HL
+reader_status:
+        ld      a, (IOBYTE_A)
+        rrca
+        rrca                                ; RDR:, IOBYTE bits 3:2
+        call    rdr_pun_select
+        jp      z, keyboard_status          ; The console
+        jp      c, ret0_in_a                ; No device
+        jp      KERNEL_SERIAL.status
+
+;
+; Selects the RDR: or PUN: device from the IOBYTE field in A bits 1:0: 0
+; the console (TTY:), 1 the ESP (PTR:, PTP:), 2 the Pi (UR1:, UP1:), 3 no
+; device (UR2:, UP2:). Returns Z for the console, NZ with C for no device,
+; or NZ with NC and the UART selected.
+;     Dirties AF
+rdr_pun_select:
+        and     %00000011
+        ret     z                           ; TTY:, the console
+        cp      3
+        jr      z, .none
+        dec     a
+        rrca
+        rrca                                ; ESP or PI
+        jr      lst_select.uart
+.none:
+        cp      4                           ; NZ, C
+        ret
         
 BIOS_HOME:
         m_kr_unimplimented HOME_string
@@ -1006,10 +1161,13 @@ BIOS_WRITE:
 WRITE_string:
         DB "BIOS_WRITE", 0
         
+;
+; List status: A = $FF when the LST: device can take a character, else 0.
+; The console always can; a UART can while its Tx buffer has room.
 BIOS_LISTST:
-        m_kr_unimplimented LISTST_string
-LISTST_string:
-        DB "BIOS_LISTST", 0
+        call    lst_select
+        jp      z, ret255_in_a              ; The console
+        jp      KERNEL_SERIAL.tx_status
         
 BIOS_SECTRAN:
         m_kr_unimplimented SECTRAN_string
@@ -1662,9 +1820,9 @@ BDOS_P_TERMCPM:     ; Function 0
         ; BIOS warm boot, as a jump to $0000 does.
         jp      BIOS.entry_WBOOT
 
-; Read a key from the keyboard, if none wait until key pressed
-; Echo printable characters, CR, LF, TAB and BS to the screen, as CP/M does.
-; Entered with C=1. Returns A=character
+; Read a character from the CON: device (BIOS_CONIN), waiting for one.
+; Echo printable characters, CR, LF, TAB and BS to the CON: device, as CP/M
+; does. Entered with C=1. Returns A=character
 BDOS_C_READ:        ; Function 1
         call    BIOS_CONIN
         ld      b, 0
@@ -1681,49 +1839,53 @@ BDOS_C_READ:        ; Function 1
         cp      KERNEL_KEYBOARD.BS
         ret     nz                          ; Other control characters are not echoed
 .echo:
-        call    KERNEL_TERM.process             ; Print character
+        call    console_out             ; Print character
         ret
 ;
+; Console output: the character in E goes to the CON: device (console_out).
 ; Entered with C=2, E=ASCII character.
 BDOS_C_WRITE:       ; Function 2
         ld      a, e
-        call    KERNEL_TERM.process
+        call    console_out
         jp      ret0_in_a
 
 ;
-; Reader input. DP/M has no reader device: returns ^Z ($1A), the end of a
-; text file, at once.
+; Reader input: returns in A the next byte from the RDR: device (BIOS_READER).
 BDOS_A_READ:        ; Function 3
-        ld      a, $1A
+        call    BIOS_READER
         ld      b, 0
         ret
 
 ;
-; Punch output. DP/M has no punch device: the character in E is discarded.
+; Punch output: the character in E goes to the PUN: device (BIOS_PUNCH).
 BDOS_A_WRITE:       ; Function 4
+        ld      c, e
+        call    BIOS_PUNCH
         jp      ret0_in_a
 
-; Direct Console IO. E==$FF means read, else write char in E to screen
+; Direct Console IO. E==$FF means read the CON: device without waiting
+; (console_get), else write char in E to it (console_out)
 BDOS_C_RAWIO:
         ld      a, e
         cp      $FF
         jr      nz, .write_console
-        call    console_take_key            ; Key, or 0 if none
+        call    console_get                 ; Byte, or 0 if none
     IF DPM_DEBUG
         call    KERNEL_DEBUG.tm_a_loc74
     ENDIF
         ld      b, 0
         ret
 .write_console
-        call    KERNEL_TERM.process
+        call    console_out
         jp      ret0_in_a
         
         
 ;
-; List output: the character in E goes to the console.
+; List output: the character in E goes to the LST: device (BIOS_LIST).
 BDOS_L_WRITE:       ; Function 5
-        ld      a, e
-        jp      BDOS_C_RAWIO.write_console
+        ld      c, e
+        call    BIOS_LIST
+        jp      ret0_in_a
 
 ;
 ; Returns A = IOBYTE, the byte at $0003.
@@ -1739,8 +1901,9 @@ BDOS_IO_SET:        ; Function 8
         ld      (IOBYTE_A), a
         jp      ret0_in_a
 
-; Print the string at DE until we see a "$". The string may be anywhere in
-; userland, so it is copied into dma_cache a piece at a time and printed from there.
+; Print the string at DE to the CON: device until we see a "$". The string
+; may be anywhere in userland, so it is copied into dma_cache a piece at a
+; time and printed from there.
 BDOS_C_WRITESTR:
         ex      de, hl                  ; HL = userland string
 .next_piece:
@@ -1755,7 +1918,7 @@ BDOS_C_WRITESTR:
         ld      a, (de)
         cp      '$'
         jp      z, ret0_in_a            ; End of string
-        call    KERNEL_TERM.process
+        call    console_out
         inc     de
         inc     hl
         djnz    .next_char
@@ -1798,14 +1961,16 @@ copy_to_userland:
         jr      nz, copy_to_userland
         ret
 
-; Read a line of edited console input into the buffer at DE: +0 the maximum
+; Read a line of edited input from the CON: device (BIOS_CONIN, echoed with
+; console_out) into the buffer at DE: +0 the maximum
 ; length (mx), +1 the count read (nc), +2 on the characters. The buffer may be
 ; anywhere in userland, so the line is built in readstr.line in the kernel and
 ; copied out when it ends. Input ends on CR or LF, or when mx characters have
 ; been typed.
 ;   BS, DEL     rub out the last character, every column it took
 ;   ^X          rub out back to the column where the line began, and start
-;               again
+;               again; with CON: on BAT: start again only, as the column is
+;               the terminal's
 ;   ^U          "#", new line, start again
 ;   ^R          "#", new line, type the line again
 ;   ^E          new line on screen, input carries on
@@ -1870,7 +2035,7 @@ BDOS_C_READSTR:
 
 .done:
         ld      a, KERNEL_KEYBOARD.CR
-        call    KERNEL_TERM.process     ; Return the carriage, as CP/M does
+        call    console_out     ; Return the carriage, as CP/M does
         ld      hl, KERNEL_BDOS.readstr.line ; Copy nc and the characters out
         ld      c, (hl)
         ld      b, 0
@@ -1887,9 +2052,9 @@ BDOS_C_READSTR:
         or      a
         jp      nz, .read_to_buffer     ; ^C later in a line is ignored
         ld      a, '^'
-        call    KERNEL_TERM.process
+        call    console_out
         ld      a, 'C'
-        call    KERNEL_TERM.process
+        call    console_out
         jp      $0000                   ; Warm boot
 
 .backspace:
@@ -1913,12 +2078,17 @@ BDOS_C_READSTR:
         jp      .read_to_buffer
 
 .erase_line:
+        ld      a, (IOBYTE_A)
+        and     %00000011
+        cp      2                       ; CON: BAT:?
+        jp      z, .restart             ; ...Yes, no screen column to rub out to
+.erase_column:
         ld      a, (KERNEL_BDOS.readstr.column)
         ld      hl, KERNEL_TERM.state.console_column
         cp      (hl)
         jp      nc, .restart            ; Back at the column where the line began
         call    .rub_out
-        jr      .erase_line
+        jr      .erase_column
 
 .new_line:
         call    .hash_newline
@@ -1950,13 +2120,13 @@ BDOS_C_READSTR:
         cp      KERNEL_KEYBOARD.TAB
         jr      z, .echo_tab
         cp      32
-        jp      nc, KERNEL_TERM.process
+        jp      nc, console_out
         push    af
         ld      a, '^'
-        call    KERNEL_TERM.process
+        call    console_out
         pop     af
         or      $40
-        jp      KERNEL_TERM.process
+        jp      console_out
 .echo_tab:
         push    bc
         ld      a, (KERNEL_TERM.state.console_column)
@@ -1965,7 +2135,7 @@ BDOS_C_READSTR:
         ld      b, a
 .echo_space:
         ld      a, ' '
-        call    KERNEL_TERM.process
+        call    console_out
         djnz    .echo_space
         pop     bc
         ret
@@ -2004,16 +2174,16 @@ BDOS_C_READSTR:
 ; Backspace, space, backspace: removes the last character from the screen
 .rub_out:
         ld      a, KERNEL_KEYBOARD.BS
-        call    KERNEL_TERM.process
+        call    console_out
         ld      a, ' '
-        call    KERNEL_TERM.process
+        call    console_out
         ld      a, KERNEL_KEYBOARD.BS
-        jp      KERNEL_TERM.process
+        jp      console_out
 
 ; "#", then a new line, spaced out to the column where the line began
 .hash_newline:
         ld      a, '#'
-        call    KERNEL_TERM.process
+        call    console_out
         call    .crlf
         ld      a, (KERNEL_BDOS.readstr.column)
         or      a
@@ -2021,15 +2191,15 @@ BDOS_C_READSTR:
         ld      b, a
 .pad:
         ld      a, ' '
-        call    KERNEL_TERM.process
+        call    console_out
         djnz    .pad
         ret
 
 .crlf:
         ld      a, KERNEL_KEYBOARD.CR
-        call    KERNEL_TERM.process
+        call    console_out
         ld      a, KERNEL_KEYBOARD.LF
-        jp      KERNEL_TERM.process
+        jp      console_out
         
 ;        
 ; Entered with C=0Bh. Returns A=L=status
@@ -2745,7 +2915,7 @@ bdos_error:
         call    KERNEL_TERM.process
         pop     hl
         call    kr_print_string_hl
-        call    BIOS_CONIN                          ; Any key...
+        call    keyboard_in                         ; Any key...
         jp      BIOS.entry_WBOOT                    ; ...then a warm boot
 
 ;-----------------------------------------------------------------------------

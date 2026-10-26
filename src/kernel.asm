@@ -18,6 +18,7 @@ kernel_start:
     INCLUDE "inc/kernel/BDOS.asm"
     INCLUDE "inc/kernel/terminal.asm"
     INCLUDE "inc/kernel/keyboard.asm"
+    INCLUDE "inc/kernel/serial.asm"
     
     INCLUDE "inc/kernel/debug.asm"
         ;; Must be last file in the included kernel parts

@@ -11,11 +11,11 @@ The `DPM` file is the dot command, followed by three binaries: the kernel, the B
 1. Saves the dot command's arguments as a command line for the CCP (`save_args`).
 2. Checks for a Z80N CPU, and ends with an error if it is not there.
 3. Saves the machine state that it changes (`backup_state`): the CPU speed, the border, the I register, the interrupt state and the pages in MMU slots 2 to 7. It then sets the CPU to 28 MHz.
-4. Allocates its memory pages from NextZXOS (`allocate_memory`), and copies `$4000`-`$7FFF` into two of them.
+4. Checks that NextZXOS has the memory pages it needs, and ends with the error "Not enough free memory banks" if not. It allocates them (`allocate_memory`), and copies `$4000`-`$7FFF` into two of them.
 5. Reads the kernel, the BIOS and the BDOS from the end of its own file into their pages.
 6. Calls `KERNEL.setup`, and then jumps to `BIOS.entry_BOOTROM`.
 
-`KERNEL.setup` (`src/inc/kernel/ROM.asm`) saves every NextReg it changes, checks the install folder, makes any missing drive folder, reads `config.ini`, sets up the tilemap, the font, the palette and the frame interrupt, and writes the page zero jumps.
+`KERNEL.setup` (`src/inc/kernel/ROM.asm`) saves every NextReg it changes, checks the install folder, makes any missing drive folder, reads `config.ini`, sets up the tilemap, the font, the palette, the frame interrupt and both UARTs, sets IOBYTE, and writes the page zero jumps.
 
 The install folder is `C:/DPM/`. The path is fixed when DP/M is assembled (`config.install_path` in `src/inc/kernel/data.asm`). If the folder is missing, DP/M ends with the error "Missing folder" and the path.
 
@@ -26,6 +26,9 @@ DP/M allocates every page it uses through NextZXOS (`IDE_BANK` through `M_P3DOS`
 - Eight 8K pages that make the CP/M 64K.
 - Two 8K pages for the kernel.
 - Two 8K pages that keep a copy of `$4000`-`$7FFF` from before DP/M started.
+- Eight 8K pages for each UART's receive buffer (`RING_PAGES` in `src/inc/addresses.asm`).
+
+That is 28 pages, 224K, all from NextZXOS's free memory.
 
 ### The CP/M 64K
 
@@ -41,7 +44,7 @@ While a CP/M program runs, the eight CP/M pages are in all eight MMU slots. The 
 
 The address at `$0006` is `$FA06`, the BDOS entry. This is the top of the TPA.
 
-The resident BDOS is a small part of the BDOS that must stay in the 64K. It has the BDOS entry, the FCB and DMA caches (`fcb_cache`, `dma_cache`), the disk parameter block and allocation vector that functions 31 and 27 return, and the frame interrupt's vector table and handler (`BLINK`).
+The resident BDOS is a small part of the BDOS that must stay in the 64K. It has the BDOS entry, the FCB and DMA caches (`fcb_cache`, `dma_cache`), the disk parameter block and allocation vector that functions 31 and 27 return, and the interrupt vector table and handlers (`BLINK`): the frame interrupt, and the UART receive interrupts with the state of each UART's receive buffer.
 
 ### The kernel
 
@@ -54,7 +57,7 @@ The kernel is in its own two pages, outside the CP/M 64K. Each BDOS call and eac
 3. Calls the kernel routine.
 4. Puts the CP/M pages back in slots 4 and 5, changes back to the caller's stack and enables interrupts.
 
-The BDOS entry is `BDOS.entry`, and it calls `KERNEL.bdos_dispatch`. The BIOS entries use `internal_KERNEL_call`, through the macro `m_BIOSStackAndCall`.
+The BDOS entry is `BDOS.entry`, and it calls `KERNEL.bdos_dispatch`. The BIOS entries use `internal_KERNEL_call`, through the macro `m_BIOSStackAndCall`, or for the entries whose speed does not matter through `bios_call` and the shorter macro `m_BIOSCompactCall`. CONOUT does the same steps itself and calls `KERNEL.BIOS_CONOUT` directly. CONST answers the keyboard's status with only the kernel's second page in slot 5, for the time it reads the console queue. With CON: on BAT: and RDR: on a UART, CONST and CONIN answer from that UART's receive buffers without the kernel, and CONIN calls the kernel only to wait for a byte.
 
 The program's memory at `$8000`-`$BFFF` is not visible while the kernel is mapped. So the kernel copies FCBs, records and strings through the caches in the resident BDOS (`cache_calling_fcb`, `copy_dma_out_kernel`, `copy_dma_in_kernel`, `copy_userland`).
 
@@ -68,11 +71,11 @@ Every file operation is an esxDOS call. For each call the kernel pages the DivMM
 
 ## BIOS
 
-The BIOS jump table is at `$FE00`. Only the console entries do work:
+The BIOS jump table is at `$FE00`.
 
-- CONST, CONIN and CONOUT use DP/M's own keyboard and terminal drivers.
-- LIST and PUNCH send the character to CONOUT.
-- READER, LISTST and the disk entries (HOME, SELDSK, SETTRK, SETSEC, SETDMA, READ, WRITE, SECTRAN) are not implemented. Each one prints a message that names the entry and returns A = `$FF`.
+- CONST, CONIN and CONOUT are the CON: device, LIST and LISTST the LST: device, PUNCH the PUN: device and READER the RDR: device (see Devices). The screen and keyboard are DP/M's own terminal and keyboard drivers.
+- LISTST returns A = `$FF` when the LST: device can take a character, else 0.
+- The disk entries (HOME, SELDSK, SETTRK, SETSEC, SETDMA, READ, WRITE, SECTRAN) are not implemented. Each one prints a message that names the entry and returns A = `$FF`.
 - Entries 17 to 28 return at once.
 - Entry 29 is DPM control (see below).
 
@@ -80,7 +83,7 @@ Cold boot and warm boot both load `CCP.COM` again. A warm boot also closes all o
 
 ## BDOS
 
-The BDOS returns version 2.2 (function 12). Functions 38, 39 and 41 to 48, which belong to MP/M and CP/M 3, return A = 0. Function 3 (reader input) returns `^Z` at once, function 4 (punch output) discards the character, and function 5 (list output) writes to the console.
+The BDOS returns version 2.2 (function 12). Functions 38, 39 and 41 to 48, which belong to MP/M and CP/M 3, return A = 0. Functions 1, 2, 6, 9, 10 and 11 use the CON: device, function 3 (reader input) the RDR: device, function 4 (punch output) the PUN: device and function 5 (list output) the LST: device (see Devices).
 
 ### Drives
 
@@ -112,9 +115,10 @@ The console is a VT100 terminal with ANSI colours on the tilemap, 80x32 text mod
 
 DP/M reads the keyboard matrix directly (`src/inc/kernel/keyboard.asm`), because the NextZXOS system variables are not available while DP/M runs. Keys go into a 16-byte input queue.
 
-- CAPS SHIFT and SYMBOL SHIFT pressed and released with no other key select Extended mode for the next key. Extended mode with 1 to 4 gives PF1 to PF4.
+- CAPS SHIFT and SYMBOL SHIFT pressed and released with no other key select Extended mode for the next key. Extended mode with 1 to 4 gives PF1 to PF4, and with a letter gives CTRL and that letter: Extended mode, then B, gives CTRL-B.
 - The cursor keys and PF1 to PF4 send VT100 escape sequences.
 - CAPS SHIFT and 2 switches caps lock on or off.
+- The DRIVE and M1 buttons give no NMI while DP/M runs (NextReg `$06` bits 4 and 3).
 
 ### Default colours
 
@@ -122,12 +126,57 @@ The console's default ink and paper colours are in the `[console]` section of `c
 
 ## Interrupts
 
-DP/M runs the Z80 in interrupt mode 2 with hardware IM2 vectors (NextReg `$C0` bit 0). Only the ULA frame interrupt is enabled. The vector table and the handler (`BLINK` in `src/BDOS.asm`) are in the resident BDOS, which is in MMU slot 7 in every mapping.
+DP/M runs the Z80 in interrupt mode 2 with hardware IM2 vectors (NextReg `$C0` bit 0). It enables the ULA frame interrupt (NextReg `$C4`) and the receive interrupts of both UARTs (NextReg `$C6`). The vector table and the handlers (`BLINK` in `src/BDOS.asm`) are in the resident BDOS, which is in MMU slot 7 in every mapping.
 
-Interrupts are on while a CP/M program runs and while CONIN waits for a key. They are off while the kernel runs. On each frame the handler:
+Interrupts are on while a CP/M program runs, while CONIN waits for a key and while the kernel waits for a UART. They are off while the kernel runs. A UART's receive interrupt moves the bytes in the UART's receive buffer to DP/M's buffer for that UART (see Devices). On each frame the frame interrupt's handler:
 
 - Scans the keyboard and puts a new key in the input queue, so that keys typed while a program is busy are kept. It does not scan while CONIN waits, because CONIN scans the keyboard itself.
 - Blinks the cursor.
+
+## Devices
+
+IOBYTE, the byte at `$0003`, gives each CP/M logical device a physical device, two bits each: CON: bits 1-0, RDR: bits 3-2, PUN: bits 5-4 and LST: bits 7-6. At a cold boot DP/M sets IOBYTE to `$95`. A warm boot keeps it. BDOS functions 7 and 8 read and write it, and `STAT.COM` on drive A: shows and changes it:
+
+```
+A0>STAT DEV:
+A0>STAT LST:=TTY:
+A0>STAT RDR:=UR1:,PUN:=UP1:
+```
+
+| Logical device | Value | Name | Physical device |
+|---|---|---|---|
+| CON: | 0 | TTY: | Screen and keyboard |
+| | 1 | CRT: | Screen and keyboard. The cold boot value. |
+| | 2 | BAT: | Input from the RDR: device, output to the LST: device |
+| | 3 | UC1: | Screen and keyboard |
+| RDR: | 0 | TTY: | Keyboard |
+| | 1 | PTR: | ESP. The cold boot value. |
+| | 2 | UR1: | Pi |
+| | 3 | UR2: | No device: input is `^Z` (`$1A`) at once |
+| PUN: | 0 | TTY: | Screen |
+| | 1 | PTP: | ESP. The cold boot value. |
+| | 2 | UP1: | Pi |
+| | 3 | UP2: | No device: output is discarded |
+| LST: | 0 | TTY: | Screen |
+| | 1 | CRT: | Screen |
+| | 2 | LPT: | Pi. The cold boot value. |
+| | 3 | UL1: | ESP |
+
+So at a cold boot `LIST` and BDOS function 5 send to the Pi, and the reader and punch are the ESP. `STAT LST:=TTY:` sends the printer output to the screen.
+
+CON: BAT: is CP/M 2.2's batch mode. Console input comes from the RDR: device, console output goes to the LST: device, and console status (BIOS CONST and BDOS function 11) is the status of the RDR: device. Terminal programs that use IOBYTE set CON: to BAT: around a call to BIOS CONST, to find out whether a byte has come from the line: for example Kermit-80's generic CP/M 2.2 build, and MDM7, MEX, ZMP and QTerm with their DEC VT180 overlays. If CON: is set to BAT: at the CCP while RDR: is a UART, the CCP reads its commands from that UART and the keyboard has no effect until a program sets CON: back. DP/M's own messages, such as `BDOS Error`, always use the screen and keyboard.
+
+### The UARTs
+
+The Next has two UARTs: one to the ESP WiFi module, and one to the Raspberry Pi on GPIO pins 14 and 15. At start DP/M (`KERNEL_SERIAL.setup` in `src/inc/kernel/serial.asm`):
+
+- Sets both UARTs to 115,200 baud, 8 data bits, no parity, 1 stop bit, no flow control. The baud rate comes from the system clock of the Next's video timing (NextReg `$11`).
+- Connects the Pi's UART to GPIO pins 14 and 15 (NextReg `$A0` bits 5 and 4).
+- Enables both UARTs' receive interrupts.
+
+DP/M does not change the ESP's own baud rate. The ESP must be at 115,200 baud, the Next's default; `.ESPBAUD` on the NextZXOS SD card finds and sets it.
+
+Each UART has a 64K receive buffer in DP/M's memory. When the UART's own 512-byte receive buffer is nearly full, its receive interrupt moves the bytes to the end of DP/M's buffer, so a program that is busy for a moment loses nothing. Input takes the oldest byte first. If DP/M's buffer is full, new bytes are lost. Output waits while the UART's 64-byte transmit buffer is full.
 
 ## DPM control
 
@@ -185,13 +234,31 @@ A0>FATDIR C:
 - A: and B: are refused, as in FATCD. For a P3DOS drive FATDIR prints `/` and no names.
 - With no arguments, FATDIR prints its usage.
 
+## TELNET
+
+`TELNET.COM` on drive A:, user 0, is a telnet client on the Next's ESP WiFi module. Its source is in `src/com/telnet/`, and `make telnet` assembles it.
+
+```
+A0>TELNET bbs.example.org
+A0>TELNET 192.168.1.10 2323
+```
+
+- The port is 23 when there is none. With no host, TELNET prints its usage.
+- TELNET does not join a WiFi network. The ESP must already be on one.
+- TELNET sends the ESP `AT`, `AT+CIPSTART`, `AT+CIPMODE=1` and `AT+CIPSEND`. Then the console shows what the remote end sends, as a VT100 with ANSI colours, and keys go to the remote end. ENTER sends CR and NUL, and DELETE sends BS (8).
+- CTRL-B leaves. TELNET sends `+++` with a pause of a second before and after it, then `AT+CIPMODE=0` and `AT+CIPCLOSE`, and returns to the CCP.
+- When the connection cannot be made, TELNET prints the ESP's error, for example `Cannot connect: DNS Fail`, and returns to the CCP.
+- TELNET refuses every telnet option the remote end asks for (DO gets WONT, WILL gets DONT), and does not show the telnet commands.
+- The ESP's AT 1.1 firmware does not report a connection that the remote end closes while data passes. It opens the connection again, and TELNET stays until CTRL-B.
+- TELNET uses CP/M calls only. The ESP is RDR: PTR: and PUN: PTP:. For each call to the ESP, TELNET sets CON: to BAT:, RDR: to PTR: and PUN: to PTP:, and for the console it puts back the IOBYTE it found, which it also leaves. LST: stays as TELNET found it.
+
 ## Exit
 
 At exit DP/M (`KERNEL.exit`, and `memmap_exit` and `state_exit` in `src/DPM.asm`):
 
-- Puts back the NextRegs that setup changed, the tilemap palette and the interrupt control and enable registers.
+- Puts back the NextRegs that setup changed, the tilemap palette, the interrupt control and enable registers, NextReg `$A0` (the Pi's GPIO functions), NextReg `$06` (the NMI buttons) and the UART select port `$153B`.
 - Copies `$4000`-`$7FFF` back, and puts back the pages NextZXOS had in MMU slots 2 to 7.
 - Frees every page it allocated.
 - Puts back the border, the CPU speed and the I register, selects interrupt mode 1 and puts back the interrupt enable state.
 
-It does not put back a drive directory changed with DPM control `$02`, or the NextReg select port `$243B`.
+It does not put back a drive directory changed with DPM control `$02`, the UARTs' baud rate and frame, which stay at 115,200 baud 8N1, or the NextReg select port `$243B`.

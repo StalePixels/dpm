@@ -68,6 +68,110 @@
     MODULE KERNEL_TERM
 
 process:
+    IF DPM_DEBUG == 0
+        ; In ground with the ASCII set, three bytes are handled here with
+        ; only the tilemap's half of bank 5 paged in, as ground and done
+        ; would do them. A printable character short of the last column
+        ; goes into the map at the cursor and the cursor moves on; the
+        ; character's cell is the cursor's, so its new attribute also takes
+        ; the cursor off it. CR, and LF outside LNM, move the cursor as
+        ; ctl.cr and ctl.lf do, scrolling the whole console at its last row.
+        ; Ground with the ASCII set means no sequence and no wrap pending.
+        push    af
+        push    hl
+        push    de
+        ld      hl, (state.stage)
+        ld      de, ground.ascii
+        or      a
+        sbc     hl, de
+        jp      nz, .slow_de                ; Not ground with the ASCII set
+        cp      ' '
+        jr      c, .control
+        ld      e, a                        ; The character
+        ld      a, (state.console_column)
+        cp      79
+        jp      z, .slow_de                 ; The last column
+        inc     a
+        ld      (state.console_column), a
+        nextreg MMU3_6000_NR_53, $0B        ; Bank 5's top half: the tilemap
+        ld      hl, (state.console_pointer)
+        ld      (hl), e
+        inc     l                           ; Cells are at even addresses
+        ld      a, (state.attribute)
+        ld      (hl), a
+        inc     hl
+        ld      (state.console_pointer), hl
+        inc     l                           ; The next cell's attribute: the cursor
+        ld      a, (hl)
+        ld      (state.cursor_attr), a
+        xor     attrReverse
+        ld      (hl), a
+        ld      (BLINK.cell), hl
+        ld      a, 1
+        ld      (state.cursor_shown), a
+        ld      a, BLINK.frames
+        ld      (BLINK.count), a
+.fast_done:
+.SMC_MMU3 EQU $+3:
+        nextreg MMU3_6000_NR_53, $AA        ; Userland, $AA replaced at setup
+        pop     de
+        pop     hl
+        pop     af
+        ret
+.control:
+        cp      13
+        jr      z, .cr
+        cp      10
+        jr      nz, .slow_de
+        ld      a, (state.newline)
+        or      a
+        jr      nz, .slow_de                ; LNM: LF also returns the carriage
+        ld      a, (state.console_row)
+        ld      hl, state.bottom
+        cp      (hl)
+        jr      z, .lf_bottom
+        cp      consoleRows-1
+        jr      z, .slow_de                 ; The last row below the region
+        nextreg MMU3_6000_NR_53, $0B        ; Bank 5's top half: the tilemap
+        call    cursor_hide
+        inc     a
+        ld      (state.console_row), a
+        jr      .point
+.lf_bottom:                                 ; Scroll, if the region is the whole console
+        ld      a, (state.top)
+        or      a
+        jr      nz, .slow_de
+        ld      a, (hl)
+        cp      consoleRows-1
+        jr      nz, .slow_de
+        nextreg MMU3_6000_NR_53, $0B        ; Bank 5's top half: the tilemap
+        call    cursor_hide
+        push    bc
+        call    screen_scroll
+        pop     bc
+        ld      a, (state.console_row)
+        jr      .point
+.cr:
+        nextreg MMU3_6000_NR_53, $0B        ; Bank 5's top half: the tilemap
+        call    cursor_hide
+        xor     a
+        ld      (state.console_column), a
+        ld      a, (state.console_row)
+.point:                                     ; The cell at console row A, as calculate_console_pointer
+        add     a, consoleTop
+        call    display_row_addr
+        ld      a, (state.console_column)
+        add     a, a                        ; Two bytes per cell
+        add     hl, a
+        ld      (state.console_pointer), hl
+        call    cursor_show
+        jr      .fast_done
+.slow_de:
+        pop     de
+        pop     hl
+        pop     af
+.slow:
+    ENDIF
         call    map_graphics_mem
         push    hl : push bc : push de : push af; Preserve entry state
         call    cursor_hide
@@ -1322,24 +1426,47 @@ fill_spaces:
         ld      a, (state.erase_attr)
         ld      e, ' '
 ;
-; Fill BC cells (at least 1) from HL with character E in attribute A
+; Fill BC cells (1 to 4079) from HL with character E in attribute A. The
+; cells are pushed, from the last one down, with SP pointing into the map
+; and interrupts off; the interrupt state is put back after.
 ;     Dirties AF, HL, DE, BC
 fill_cells:
-        ld      (hl), e
-        inc     hl
-        ld      (hl), a
-        dec     hl
-        dec     bc
-        ld      a, b
-        or      c
-        ret     z
-        ld      d, h
-        ld      e, l
-        inc     de
-        inc     de                          ; The next cell
-        sla     c
-        rl      b                           ; Bytes in the cells left
-        ldir                                ; Copies the first cell along
+        ld      d, a                        ; DE = the cell, the attribute high
+        add     hl, bc
+        add     hl, bc                      ; Just past the last cell
+        push    hl
+        ld      a, c
+        and     15
+        neg
+        add     a, 16                       ; 16 - the cells over whole blocks of 16
+        ld      hl, .block
+        add     hl, a
+        ld      (.SMC_entry), hl            ; Into the block, so the first pass pushes those
+        ld      a, c
+        srl     b : rra
+        srl     b : rra
+        srl     b : rra
+        srl     b : rra                     ; Whole blocks of 16
+        inc     a                           ; The first pass, through djnz, is one more
+        ld      b, a
+        pop     hl
+        ld      a, i                        ; P/V = the interrupt state
+        di
+        push    af
+        ld      (.SMC_sp), sp
+        ld      sp, hl
+.SMC_entry EQU $+1
+        jp      0
+.block:
+        DUP     16
+        push    de
+        EDUP
+        djnz    .block
+.SMC_sp EQU $+1
+        ld      sp, 0
+        pop     af
+        ret     po                          ; Interrupts were off
+        ei
         ret
 
 ;
@@ -1347,8 +1474,15 @@ fill_cells:
 ; last console row, and console row 0 becomes display row 0 and is cleared
 ;     Dirties AF, HL, DE, and BC
 screen_scroll:
+    IF DPM_DEBUG == 0
+        ld      a, (state.erase_attr)
+        ld      hl, state.default_attr
+        cp      (hl)
+        jr      z, .blank                   ; Display row 31 already holds those cells
+    ENDIF
         ld      a, 31
         call    clear_display_row
+.blank:
         ld      hl, state.scroll_row
         ld      a, (hl)
         inc     a
@@ -1356,7 +1490,7 @@ screen_scroll:
         ld      (hl), a
         call    set_scroll
         xor     a
-        jr      clear_border_row
+        jp      clear_border_row
 
 ;
 ; Scroll the whole console down one line: display rows 31 and 0, blank,
@@ -1375,7 +1509,7 @@ screen_scroll_down:
         ld      (hl), a
         call    set_scroll
         ld      a, 31
-        jr      clear_border_row
+        jp      clear_border_row
 
 map_graphics_mem:
         nextreg	MMU2_4000_NR_52, 0x0A

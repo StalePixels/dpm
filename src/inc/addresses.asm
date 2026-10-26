@@ -34,6 +34,10 @@ BDOSPTR_A       EQU     $0006       ;address field of jmp BDOS
     ;; the warm boot address at $0001
 BIOS_CONTROL_OFS EQU    84
 
+    ;; Each UART's Rx ring (BLINK.esp_ring, BLINK.pi_ring): 64K in eight 8K
+    ;; pages of its own
+RING_PAGES      EQU     8
+
 TBUFF_A         EQU     $0080       ; DEFAULT DISK I/O BUFFER
 TFCB_A          EQU     $005C       ; DEFAULT FCB BUFFER
 TPA_A           EQU     $0100       ; BASE OF TPA

@@ -21,11 +21,29 @@ read_char_a:
 ; its matrix position, so letting go of a shift key before the key itself
 ; gives no second character. CAPS SHIFT+2 toggles caps lock and returns 0.
 ; CAPS SHIFT and SYMBOL SHIFT pressed and let go with no other key toggle
-; Extended mode, as in NextZXOS; it applies to the next key, and Extended +
-; 1 to 4 give KEY_PF1 to KEY_PF4. A code of KEY_SEQUENCE or more is a key
+; Extended mode, as in NextZXOS; it applies to the next key. Extended + 1
+; to 4 give KEY_PF1 to KEY_PF4; Extended + any other key gives its CTRL
+; code from MAP_CSSS, or the key as it is when that has none. A code of KEY_SEQUENCE or more is a key
 ; that sends an ESC sequence ending in its low 7 bits (KERNEL.console_scan).
 ; Dirties HL, BC, DE
 read_new_key:
+    xor     a
+    in      a, ($FE)                        ; Every row at once, low == pressed
+    cpl
+    and     0b00011111
+    jr      nz, .scan                       ; A key is down
+    ld      a, (keypos)
+    ld      hl, prevpos
+    and     (hl)
+    inc     a                               ; No key at the last scan, nor the one before?
+    jr      nz, .scan
+    ld      a, (shifts)
+    or      a                               ; No shift at the last scan?
+    jr      nz, .scan
+    ld      a, (extended)
+    and     EXT_PRESS                       ; No shift press being tracked?
+    ret     z                               ; ...Nothing down, nothing changes: A=0
+.scan:
     call    read_char_a                     ; This scan's key, 0 if none
     ld      b, a
     ld      hl, extended
@@ -66,9 +84,16 @@ read_new_key:
     res     EXT_ARMED, (hl)                 ; ...Yes, for this key only
     sub     16                              ; A is position + 1; keys 1 to 4 are 15 to 18
     cp      4
-    jr      nc, .key                        ; Not 1 to 4: the key as it is
+    jr      nc, .ctrl                       ; Not 1 to 4: CTRL and the key
     add     a, KEY_PF1
     ret
+.ctrl:
+    ld      a, (keypos)
+    ld      hl, MAP_CSSS
+    add     hl, a
+    ld      a, (hl)                         ; The key's CTRL code
+    or      a
+    ret     nz
 .key:
     ld      a, b
     cp      CAPS
