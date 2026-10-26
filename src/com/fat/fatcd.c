@@ -6,6 +6,10 @@
  * FATCD d:         prints the FAT directory of drive d:
  * FATCD d: path    changes it, to an absolute path or one relative to it
  *
+ * The path is the rest of the command line after the drive and the spaces
+ * that follow it, spaces inside it kept, trailing spaces dropped. It is read
+ * from the command tail at $0080, as the CCP left it, in upper case.
+ *
  * Drives C: and up are NextZXOS drives, and DP/M uses each one's directory
  * as the drive. It is changed and read through DPM control functions $02
  * and $03 (fat.h). A: and B: are DP/M's own drives and are refused. A P3DOS
@@ -16,33 +20,47 @@
  *
  * Built with z88dk: zcc +cpm -compiler=sdcc.
  *---------------------------------------------------------------------------*/
+#pragma output CRT_ENABLE_COMMANDLINE = 0
+
 #include <cpm.h>
 #include "fat.h"
 
-int main(int argc, char *argv[])
+int main(void)
 {
     char path[FAT_PATH_LEN];
+    const char *end = (const char *)0x81 + *(unsigned char *)0x80;
+    const char *t = (const char *)0x81;
     const char *d;
     char *p;
     unsigned char drive, e;
 
-    if (argc < 2 || argc > 3) {
+    while (t < end && *t == ' ')
+        t++;
+    if (t == end) {
         println("Usage: FATCD d: [path]");
         println("Prints or changes the FAT directory of drive d:, C: to P:.");
         return 0;
     }
-    d = argv[1];
-    if (d[0] < 'A' || d[0] > 'P' || d[1] != ':' || d[2]) {
+    if (end - t < 2 || t[0] < 'A' || t[0] > 'P' || t[1] != ':' || (end - t > 2 && t[2] != ' ')) {
         println("Give a drive, C: to P:");
         return 1;
     }
-    drive = d[0] - 'A';
+    drive = t[0] - 'A';
     if (drive < 2) {
         println("A: and B: are DP/M's own drives");
         return 1;
     }
-    if (argc == 3) {
-        e = dpm_control((drive << 8) | DPM_CHDIR, argv[2], 0);
+    t += 2;
+    while (t < end && *t == ' ')
+        t++;
+    while (end > t && end[-1] == ' ')
+        end--;
+    if (t < end) {
+        p = path;
+        while (t < end)
+            *p++ = *t++;
+        *p = 0;
+        e = dpm_control((drive << 8) | DPM_CHDIR, path, 0);
         if (e) {
             error(e);
             return 1;
