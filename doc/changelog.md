@@ -1,4 +1,4 @@
-v1.2.0 (in progress)
+v1.2.0
 
  - FATCD shows and changes the directory of drives C: to P:
  - FATDIR lists the directories in it
