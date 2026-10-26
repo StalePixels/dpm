@@ -4,7 +4,7 @@ DP/M installs a set of CP/M programs on drive A, user 0. On the SD card they are
 
 ## Source
 
-`EXIT` and `CONCOLOR` are part of DP/M. Their source is in the DP/M repository, https://github.com/Xalior/dpm.
+`EXIT`, `CONCOLOR`, `FATCD` and `FATDIR` are part of DP/M. Their source is in the DP/M repository, https://github.com/Xalior/dpm.
 
 The other programs are built from cpmish, https://github.com/StalePixels/cpmish, branch `DPM`.
 
@@ -12,7 +12,7 @@ The other programs are built from cpmish, https://github.com/StalePixels/cpmish,
 
 | Program | Licence | File |
 |---|---|---|
-| `EXIT`, `CONCOLOR` | GNU LGPL version 3 | `COPYING.lgpl3`, with `COPYING.camelforth` |
+| `EXIT`, `CONCOLOR`, `FATCD`, `FATDIR` | GNU LGPL version 3 | `COPYING.lgpl3`, with `COPYING.camelforth` |
 | `COPY`, `DUMP`, `QE`, `STAT`, `SUBMIT` | BSD 2-clause | `COPYING.cpmish` |
 | `ASM` | BSD 2-clause per cpmish's README (the source header says MIT) | `COPYING.cpmish` |
 | `BBCBASIC` | zlib | `COPYING.bbcbasic` |

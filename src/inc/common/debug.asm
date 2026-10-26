@@ -1,5 +1,5 @@
 ;-----------------------------------------------------------------------------
-; .DPM CSpect Debugger Helper Stuff
+; .DPM Debugger Helper Stuff
 ;-----------------------------------------------------------------------------
 ; © D. 'Xalior' Rimron-Soutter, license: https://opensource.org/licenses/lgpl-3.0.html
 ;

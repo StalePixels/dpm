@@ -23,7 +23,7 @@
     INCLUDE "inc/structs.asm"                   ; Application specific structures
     INCLUDE "inc/common/macros.asm"             ; Macros - all macros starting with m_
         
-    INCLUDE "inc/common/debug.asm"              ; CSpect Debugging - all macros starting with m_CSpect_
+    INCLUDE "inc/common/debug.asm"              ; Debugging: DPM_DEBUG and the m_BREAK and m_CSpect_EXIT macros
         
                                         ; Generate our dependencies, which are appended to the dot
     INCLUDE "BIOS.asm"                          ; BIOS main mem

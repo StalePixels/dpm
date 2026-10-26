@@ -87,7 +87,7 @@ The BDOS returns version 2.2 (function 12). Functions 38, 39 and 41 to 48, which
 DP/M has drives A: to P:.
 
 - A: and B: are folders in the install folder, one for each user number: `C:/DPM/A/0/` to `C:/DPM/A/15/`, and the same for `B`. `KERNEL.setup` makes any of these folders that is missing.
-- C: to P: are the NextZXOS drives with the same letter. DP/M uses each one relative to that drive's current directory in NextZXOS. The user number has no effect on these drives.
+- C: to P: are the NextZXOS drives with the same letter. DP/M uses each one relative to that drive's current directory in NextZXOS. The user number has no effect on these drives. `FATCD.COM` shows and changes that directory (see FAT directories below).
 
 Selecting a drive that NextZXOS does not have gives "BDOS Error on d: Select". The path for each file is made by `KERNEL_BDOS.drive_and_user_to_path` (`src/inc/kernel/BDOS.asm`).
 
@@ -139,12 +139,51 @@ DPM control is DP/M's own BIOS entry, for CP/M programs. It is entry 29 of the B
 | `$01` | Set the console's default colours, and write them to `config.ini`. | D = ink, E = paper, each 0 to 7 in the order of the colour names above | A = 0, or `$FF` for a colour above 7 or an error with `config.ini` |
 | `$02` | Change a drive's current directory in NextZXOS. | B = drive (0 = A:), DE = the path, ending in 0 | A = 0, or an esxDOS error code |
 | `$03` | Get a drive's current directory. | B = drive, DE = a 263-byte buffer | A = 0 and the path in the buffer, ending in 0, or an esxDOS error code |
+| `$04` | Get the name of one directory in a drive's current directory. | B = drive, HL = the index of the directory (0 = the first), DE = a 263-byte buffer | A = 0 and the name in the buffer, ending in 0, `$FF` when there is no directory with that index, or an esxDOS error code |
 
 Any other function number returns A = `$FF`.
 
-Functions `$02` and `$03` close all open files and the directory search first, because file paths are relative to the drive's directory. A drive that is not mapped gives esxDOS error 11 (No such drive). The RAMdisk and `.P3D` or `.DSK` image drives have no directories: `$03` gives `/`, and `$02` gives esxDOS error 17 (Not a directory). A directory changed with `$02` stays changed in NextZXOS after DP/M ends.
+Functions `$02` and `$03` close all open files and the directory search first, because file paths are relative to the drive's directory. `$02` takes a path of up to 256 characters, absolute or relative to the drive's current directory, with long or 8.3 names. `$03` gives the path as esxDOS function `F_GETCWD` gives it: the drive, 8.3 names and a closing slash, for example `C:/FATTEST/`.
 
-The CCP command `EXIT` and the program `EXIT.COM` use function `$00`.
+Function `$04` reads the drive's current directory and counts only its directories. It leaves out `.`, so in a subdirectory `..` is directory 0. The order is the order esxDOS reads the entries. The name is the long name, or the 8.3 name of a directory that has no long name. `$04` does not close open files or the directory search, so a program can call it between search first and search next.
+
+A drive that is not mapped gives esxDOS error 11 (No such drive). DP/M finds what a drive is with the NextZXOS call `IDE_DOS_MAPPING`. The RAMdisk and `.P3D` or `.DSK` image drives (P3DOS drives) have no directories: `$03` gives `/`, `$02` gives esxDOS error 17 (Not a directory), and `$04` gives `$FF`. A directory changed with `$02` stays changed in NextZXOS after DP/M ends.
+
+The CCP command `EXIT` and the program `EXIT.COM` use function `$00`. `FATCD.COM` uses functions `$02` and `$03`, and `FATDIR.COM` uses `$03` and `$04`.
+
+## FAT directories
+
+Each of the drives C: to P: is the current directory of the NextZXOS drive with the same letter. Two programs on drive A:, user 0, show and change these directories. Their source is in `src/com/fat/`. They are C programs, and `make fat` compiles them with z88dk's zsdcc compiler in z88dk's Docker image.
+
+`FATCD d:` prints the current directory of drive `d:`. `FATCD d: path` changes it, and prints nothing when the change works:
+
+```
+A0>FATCD C: /FATTEST/Long Folder Name
+A0>FATCD C:
+/FATTEST/LONGFO~1
+A0>FATCD C: ..
+```
+
+- The path is absolute, or relative to the current directory. It is the rest of the command line after the drive. Spaces inside it are kept, so a folder name with spaces needs no quotes. Spaces at the end are dropped, and a path cannot start with a space.
+- A path can use long names or 8.3 names. FATCD prints 8.3 names, because NextZXOS gives the current directory in that form. It prints the path without the drive and without a closing slash. The root is `/`.
+- A: and B: are DP/M's own drives, not NextZXOS drives, and FATCD refuses them.
+- A P3DOS drive, such as the RAMdisk, has no directories. FATCD prints `/` for it, and a change gives "Not a directory".
+- An error prints the esxDOS message, for example "No such drive" for a drive that is not mapped, or "Not a directory" for a path that does not exist.
+- With no arguments, FATCD prints its usage.
+
+`FATDIR d:` prints the current directory of drive `d:` as `FATCD d:` prints it, then the names of the directories in it, one to a line:
+
+```
+A0>FATDIR C:
+/FATTEST/SUB
+..
+```
+
+- In a subdirectory, `..` is first. The other names follow in the order esxDOS reads them.
+- Each name is the long name, or the 8.3 name of a directory that has no long name. `FATCD` accepts either.
+- FATDIR lists directories only, not files. `DIR` lists the files.
+- A: and B: are refused, as in FATCD. For a P3DOS drive FATDIR prints `/` and no names.
+- With no arguments, FATDIR prints its usage.
 
 ## Exit
 
