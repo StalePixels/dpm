@@ -1,5 +1,4 @@
 # External commands we use, override with Env Vars
-MONO:=mono
 CAT:=cat
 CP:=cp
 TOUCH:=touch
@@ -12,10 +11,11 @@ MAME:=mame
 SEQ:=seq
 TXT2BAS:=txt2bas
 ZIP:=zip
+DOCKER:=docker
 
 # --- Emulator image: NextZXOS SD card. Its FAT volume is labelled "DPM",
 #     so it always mounts at /Volumes/DPM (see `install_emu`).
-IMAGE:=2gb/cspect-next-2gb.img
+IMAGE:=2gb/next-2gb.img
 MOUNT:=/Volumes/DPM
 # NextZXOS dot-commands live in DOT_DIR (so build/DPM installs as .DPM);
 # EMU_PATH is DP/M's install folder: CCP.COM, and the CP/M emulated drives
@@ -35,8 +35,8 @@ VERSION:=$(shell sed -n 's/.*DEFINE DPMversion "\(.*\)".*/\1/p' src/inc/version.
 RELEASE_ZIP:=build/dpm-$(VERSION).zip
 
 # --- MAME: ZX Spectrum Next driver + Next debugging plugins.
-#     nextbreak    traps the $FD $00 opcode emitted by m_CSpect_BREAK, so the
-#                  in-code breakpoints fire exactly as under CSpect.
+#     nextbreak    traps the $FD $00 opcode emitted by m_BREAK, so the
+#                  in-code breakpoints fire.
 #     debugstart   keeps -debug enabled but HIDES the debugger window at boot,
 #                  so the machine runs until a breakpoint opcode fires.
 #     nextfaststart skips the NextZXOS boot delay.
@@ -49,24 +49,18 @@ MAME_RUN:=$(MAME) $(MAME_SYS) -hard1 $(IMAGE) \
 		-window -nomaximize -resolution 1024x768 -nothrottle \
 		-debug -plugin nextbreak,debugstart,nextfaststart
 
-.PHONY: dev emulate turbo dot ccp exit concolor cpmish release install_emu autoexec mount_image unmount_image \
-        cspect cspect_turbo setup_emulator setup_emulator_testfiles \
+.PHONY: dev emulate turbo dot ccp exit concolor fat cpmish release install_emu autoexec mount_image unmount_image \
+        setup_emulator setup_emulator_testfiles \
         _setup_dirs _setup_files
 
 # Run under MAME (debugger stays hidden until a breakpoint opcode fires).
 emulate:
 	$(MAME_RUN)
 
-# As above but unthrottled (the old CSpect "turbo"; breakpoints still live).
+# As above but unthrottled (breakpoints still live).
 turbo:
 	$(MAME_RUN) -nothrottle
 
-# CSpect fallback (pre-MAME). Remove once the MAME spike is confirmed.
-cspect:
-	$(MONO) CSpect/CSpect.exe -sound -mouse -w8 -zxnext -r -joy -esc -basickeys -brk -16bit -fps -mmc=$(IMAGE) -map=src/DPM.map
-
-cspect_turbo:
-	$(MONO) CSpect/CSpect.exe -sound -mouse -w8 -zxnext -r -joy -esc -basickeys -brk -16bit -freerun -fps -mmc=$(IMAGE) -map=src/DPM.map
 
 dot:
 	cd src && $(SJASMPLUS) DPM.asm
@@ -90,8 +84,24 @@ exit:
 # a C program built with z88dk into DRIVE_A0 with the other drive A, user 0
 # programs.
 concolor:
-	cd src/concolor && $(ZCC) +cpm -O2 concolor.c -o ../../build/CONCOLOR.COM
+	cd src/com/concolor && $(ZCC) +cpm -O2 concolor.c -o ../../../build/CONCOLOR.COM
 	$(CP) build/CONCOLOR.COM $(DRIVE_A0)/CONCOLOR.COM
+
+# The FAT programs, FATCD.COM and FATDIR.COM, C programs in src/com/fat built
+# with zsdcc into DRIVE_A0 with the other drive A, user 0 programs. Only the
+# z88dk tools run in z88dk's Docker image, with this folder mounted at the
+# same path.
+Z88DK_IMAGE:=z88dk/z88dk:latest
+Z88DK_RUN=$(DOCKER) run --rm --user $(shell id -u):$(shell id -g) -e HOME=/tmp \
+		-v $(CURDIR):$(CURDIR) -w $(CURDIR)/$(1) $(Z88DK_IMAGE)
+FAT_ZCC=$(call Z88DK_RUN,src/com/fat) zcc +cpm -compiler=sdcc -SO3 --opt-code-size \
+		-pragma-define:CRT_COMMANDLINE_REDIRECTION=0 -pragma-define:CLIB_OPEN_MAX=0 \
+		-pragma-define:CLIB_FOPEN_MAX=0 -pragma-define:noprotectmsdos=1
+fat:
+	$(FAT_ZCC) fatcd.c -o ../../../build/FATCD.COM
+	$(CP) build/FATCD.COM $(DRIVE_A0)/FATCD.COM
+	$(FAT_ZCC) fatdir.c -o ../../../build/FATDIR.COM
+	$(CP) build/FATDIR.COM $(DRIVE_A0)/FATDIR.COM
 
 # Rebuild cpmish's programs (dev/cpmish/build.sh, in Docker) into a temporary
 # folder, then replace the .COM files in DRIVE_A0 with them, names upper-cased
@@ -107,7 +117,7 @@ cpmish:
 # CCP.COM, the empty drive folders A/0..15 and B/0..15 (stored as folder
 # entries, so they exist after extraction), the DRIVE_A0 programs in A/0, and
 # the licences in docs/. Nothing else.
-release: dot ccp exit concolor
+release: dot ccp exit
 	rm -f $(RELEASE_ZIP)
 	tmp=$$(mktemp -d) && \
 	$(CP) build/DPM build/CCP.COM $$tmp/ && \
@@ -152,9 +162,10 @@ unmount_image:
 
 dev: dot ccp exit install_emu turbo
 
-# Mount the image, create the CP/M drive tree (C:/DPM/{A,B}/{0..15}) that the
-# kernel's setup probes with F_OPENDIR, then unmount. (_setup_dirs does the
-# actual mkdirs; it runs via recursive make while the image is mounted.)
+# Mount the image, create the CP/M drive tree (C:/DPM/{A,B}/{0..15}), then
+# unmount. The kernel's setup also makes any of these folders that is missing.
+# (_setup_dirs does the actual mkdirs; it runs via recursive make while the
+# image is mounted.)
 setup_emulator:
 	@$(HDIUTIL) detach $(MOUNT) >/dev/null 2>&1 || true
 	$(HDIUTIL) attach -nobrowse -imagekey diskimage-class=CRawDiskImage $(IMAGE)

@@ -104,7 +104,7 @@ backup_state:
         call    zxn_AvailablePages          ; Number of pages available returned in A
         ;; Check how many free memory available - error out if less than 96KB
         and     a                           ; Clear carry flag, leave A intact
-        sub     13                          ; Minus 13, the number of pages we need
+        sub     12                          ; Minus 12, the number of pages we need
         jr      nc, allocate_memory:        ; Sufficent memory found, jump to next stage
         
         xor     a                           ; Wipe A, also wipes carry flag... so set it again
@@ -248,7 +248,7 @@ pause:
         pop     af
         dec     a
         jp      nz, pause
-        m_CSpect_BREAK
+        m_BREAK
 
 
 ;-----------------------------------------------------------------------------

@@ -86,7 +86,7 @@ dynamic_data:
 .tilemap_palette                            ; NextZXOS's tilemap first palette, put back
         DS  512, $00                        ; at exit: per colour, bits 8-1 then bit 0
 
-.config_text                               ; config.ini as read, ending in 0
+.config_text                               ; config.ini as read, ending in 0; control_list reads entries here
         DS  CONFIG_MAX+1, $00
 .config_end                                 ; The address of the 0 that ends config_text
         DW  0

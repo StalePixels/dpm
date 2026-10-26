@@ -14,7 +14,7 @@
 ; them out.
 DPM_DEBUG       EQU     0
 
-m_CSpect_BREAK MACRO
+m_BREAK MACRO
         DW  0x00FD
     ENDM
 

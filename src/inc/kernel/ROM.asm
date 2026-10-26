@@ -12,7 +12,7 @@ m_kr_unimplimented MACRO func_name
         call    kr_print_unimplimented
         ld      hl, func_name
         call    kr_print_string_hl
-        m_CSpect_BREAK
+        m_BREAK
         ld      hl, $00FF                   ; Unimplemented calls return A=L=$FF, B=H=0
         jp      ret255_in_a
     ENDM
@@ -20,7 +20,7 @@ m_kr_fatal MACRO func_name
         call    kr_print_error
         ld      hl, func_name
         call    kr_print_string_hl
-        m_CSpect_BREAK
+        m_BREAK
         jr      $
     ENDM
 ;
@@ -1022,6 +1022,7 @@ SECTRAN_string:
 ;   $01  control_console, set the console's default colours.
 ;   $02  control_fat, change a drive's directory.
 ;   $03  control_fat, get a drive's directory.
+;   $04  control_list, list the directories in a drive's directory.
 ; Any other number returns A = $FF.
 BIOS_CONTROL:
         ld      a, c
@@ -1032,6 +1033,8 @@ BIOS_CONTROL:
         dec     a
         cp      CONTROL_GETCWD-CONTROL_CHDIR+1
         jp      c, control_fat
+        cp      CONTROL_LIST-CONTROL_CHDIR
+        jp      z, control_list
         jp      ret255_in_a
 
 ;
@@ -1436,6 +1439,94 @@ control_fat:
         jr      .copy_out
 .no_drive:
         ld      a, esx_enodrv
+        ret
+
+;
+; Copy the name of directory HL (0 = the first) in drive B's directory to the
+; 263-byte buffer at DE in the TPA, ending in 0. The directories are those
+; F_READDIR gives for "d:", in its order, with "." left out, so ".." is the
+; first in a subdirectory. The name is the long name, or the 8.3 name of a
+; directory that has none. Returns A = 0 with a name, A = $FF when there is
+; no directory HL, or an esxDOS error code: No such drive for a drive that
+; is not mapped. A P3DOS drive has no directories. The directory has its own
+; handle, closed before the return, so open files and the directory search
+; are left as they are. Each entry is read into config_text, which holds
+; config.ini only while DP/M starts and in control_console.
+;     Dirties AF, BC, DE, HL and the alternate registers
+CONTROL_LIST    EQU     $04
+control_list:
+        ld      (.SMC_index), hl
+        call    fat_drive_unit              ; A = unit
+        jr      c, control_fat.no_drive
+        cp      4                           ; The RAMdisk
+        jp      z, ret255_in_a
+        cp      $FF                         ; A .P3D or .DSK image
+        jp      z, ret255_in_a
+        push    de                          ; The buffer in the TPA
+        ld      hl, dynamic_data.working_path
+        ld      a, b
+        add     a, 'A'
+        ld      (hl), a                     ; "d:"
+        inc     hl
+        ld      (hl), ':'
+        inc     hl
+        ld      (hl), 0
+        ld      a, '*'                      ; Not important, the path's drive overrides it
+        ld      b, esx_mode_lfn_only
+        ld      hl, dynamic_data.working_path
+        m_kr_esxdos F_OPENDIR
+        jr      c, .error
+        ld      (.SMC_handle), a
+.read:
+.SMC_handle EQU $+1
+        ld      a, $AA
+        ld      hl, dynamic_data.config_text
+        m_kr_esxdos F_READDIR
+        jr      c, .close_error
+        or      a
+        jr      z, .none
+        ld      hl, dynamic_data.config_text
+        ld      a, (hl)                     ; FAT attributes
+        and     fat_attr_directory
+        jr      z, .read                    ; A file
+        inc     hl
+        ld      a, (hl)
+        cp      '.'
+        jr      nz, .count
+        inc     hl
+        ld      a, (hl)
+        or      a
+        jr      z, .read                    ; "."
+.count:
+.SMC_index EQU $+1
+        ld      hl, $AAAA
+        ld      a, h
+        or      l
+        jr      z, .found
+        dec     hl
+        ld      (.SMC_index), hl
+        jr      .read
+.found:
+        call    .close
+        pop     de
+        ld      hl, dynamic_data.config_text+1
+        ld      bc, ESXDOS_MAX_PATH_LENGTH+1
+        call    copy_to_userland
+        jp      ret0_in_a
+.none:
+        call    .close
+        pop     de
+        jp      ret255_in_a
+.close_error:
+        push    af
+        call    .close
+        pop     af
+.error:
+        pop     de
+        ret                                 ; A = the esxDOS error
+.close:
+        ld      a, (.SMC_handle)
+        m_kr_esxdos F_CLOSE
         ret
 
 ;
